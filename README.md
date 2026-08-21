@@ -11,7 +11,7 @@ npm install
 npm run dev
 ```
 
-- `/` is the game: profile, 60-second placement, Stage 1-2 lessons in the gray-box encounter, speed test, progress screen. Type the prompt to fire. Wrong key is a dry-fire; backspace does nothing in combat. The next words sit to the right of the active one so you can read ahead: `F2` cycles how many (0-4).
+- `/` is the game: profile, 60-second placement, Stage 1-5 lessons in the gray-box encounter, speed test, progress screen. Type the prompt to fire. Wrong key is a dry-fire; backspace does nothing in combat. The next words sit to the right of the active one so you can read ahead: `F2` cycles how many (0-4).
 - `/harness/input-fidelity.html` is the Input Fidelity Test harness (PRD 3.1). Run it in Chrome, Edge, and Firefox and export a log per browser into `docs/input-fidelity-logs/`.
 - `/harness/legibility.html` is the Text Legibility harness (PRD 3.2): worst-case fog, motion, and flash behind the real prompt renderer with a measured WCAG contrast ratio.
 
@@ -35,7 +35,8 @@ npm run dev
 | Keyboard auto-hide, and the finger hint that makes it safe | done |
 | Weak-key injection into lesson content (PRD 13) | done |
 | Adaptive difficulty: enemy timing from demonstrated pace, timer-was-wrong easing (PRD 13) | done |
-| Stages 3-10 | later phases; `STAGE_KEYS` already knows what they teach, so content filtering is correct for a profile placed into them |
+| Stages 3-5: upper row, lower row, common words (14 new lessons) | done |
+| Stages 6-10: capitals, punctuation, numbers, sentences, paragraphs | later phases |
 
 ## Architecture rules
 

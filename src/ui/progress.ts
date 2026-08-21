@@ -183,6 +183,6 @@ function stageList(profile: Profile): string {
         <span class="detail">${s.lessons.length} lessons</span>
       </li>`;
   }).join('')}
-    <li class="locked"><span class="mark">·</span> Stages 3-10 arrive in later phases</li>
+    <li class="locked"><span class="mark">·</span> Stages 6-10 arrive in later phases</li>
   </ol>`;
 }

@@ -31,6 +31,23 @@ export interface Stage {
 
 const HOME_LEFT = ['a', 's', 'd', 'f'];
 const HOME_RIGHT = ['j', 'k', 'l', ';'];
+const HOME = [...HOME_LEFT, ...HOME_RIGHT];
+
+/*
+ * Cumulative key sets for Stages 3-4. Each lesson's `keys` is everything
+ * taught so far, so pools can always mix new keys with mastered ones -- the
+ * PRD's "keys added in small groups, mixed with mastered keys". The
+ * validateStages() test holds every pool word to its lesson's set.
+ */
+const K_GH = [...HOME, 'g', 'h'];
+const K_EI = [...K_GH, 'e', 'i'];
+const K_RU = [...K_EI, 'r', 'u'];
+const K_TY = [...K_RU, 't', 'y'];
+const K_WO = [...K_TY, 'w', 'o'];
+const K_QP = [...K_WO, 'q', 'p']; // the full Stage 3 set
+const K_NM = [...K_QP, 'n', 'm'];
+const K_CV = [...K_NM, 'c', 'v'];
+const K_ALL = [...K_CV, 'b', 'x', 'z']; // the full letter set
 
 export const STAGES: Stage[] = [
   {
@@ -110,6 +127,196 @@ export const STAGES: Stage[] = [
         pool: [
           'salad', 'flask', 'asdf', 'jkl;', 'falls', 'dads', 'ask', 'all', 'fall',
           'lass', 'skald', 'fjfj', 'dkdk', 'alas', 'flak', 'lads',
+        ],
+      },
+    ],
+  },
+  {
+    number: 3,
+    title: 'Upper row',
+    lessons: [
+      {
+        id: '3-1',
+        title: 'G and H',
+        objective: 'Index fingers stretch inward without leaving the bumps.',
+        introduces: ['g', 'h'],
+        keys: K_GH,
+        targetTokens: 28,
+        pool: [
+          'fgf', 'jhj', 'gg', 'hh', 'gas', 'has', 'had', 'hall', 'half', 'glad',
+          'flag', 'dash', 'gash', 'flash', 'shall', 'glass', 'slash',
+        ],
+      },
+      {
+        id: '3-2',
+        title: 'E and I',
+        objective: 'Middle fingers reach up. The two most common letters in English.',
+        introduces: ['e', 'i'],
+        keys: K_EI,
+        targetTokens: 28,
+        pool: [
+          'ded', 'kik', 'die', 'lie', 'aid', 'said', 'side', 'idea', 'fail', 'jail',
+          'seal', 'deal', 'idle', 'hide', 'edge', 'slide', 'field', 'ladies',
+        ],
+      },
+      {
+        id: '3-3',
+        title: 'R and U',
+        objective: 'Index fingers reach up, then straight back to the bumps.',
+        introduces: ['r', 'u'],
+        keys: K_RU,
+        targetTokens: 28,
+        pool: [
+          'frf', 'juj', 'rule', 'sure', 'user', 'rise', 'fire', 'ride', 'urge', 'huge',
+          'raid', 'fuel', 'usher', 'surge', 'ruler', 'desire', 'failure', 'hurried',
+        ],
+      },
+      {
+        id: '3-4',
+        title: 'T and Y',
+        objective: 'The long index stretches. This unlocks the most common word there is.',
+        introduces: ['t', 'y'],
+        keys: K_TY,
+        targetTokens: 30,
+        pool: [
+          'ftf', 'jyj', 'the', 'try', 'yet', 'day', 'they', 'that', 'this', 'test',
+          'tell', 'salt', 'last', 'late', 'style', 'daily', 'eight', 'thirty', 'turtle', 'reality',
+        ],
+      },
+      {
+        id: '3-5',
+        title: 'W and O',
+        objective: 'Ring fingers reach up. Whole sentences become possible.',
+        introduces: ['w', 'o'],
+        keys: K_WO,
+        targetTokens: 30,
+        pool: [
+          'sws', 'lol', 'who', 'how', 'two', 'low', 'row', 'word', 'work', 'world',
+          'would', 'house', 'water', 'other', 'wrote', 'yellow', 'follow', 'hollow', 'shadow', 'weather',
+        ],
+      },
+      {
+        id: '3-6',
+        title: 'Q and P',
+        objective: 'The little fingers earn their keep.',
+        introduces: ['q', 'p'],
+        keys: K_QP,
+        targetTokens: 30,
+        pool: [
+          'aqa', ';p;', 'up', 'put', 'pay', 'play', 'stop', 'pull', 'push', 'quit',
+          'quiet', 'quite', 'equal', 'paper', 'people', 'purple', 'quote', 'square', 'request', 'popular',
+        ],
+      },
+      {
+        id: '3-7',
+        title: 'The whole upper row',
+        objective: 'Everything above the bumps, together, at speed.',
+        introduces: [],
+        keys: K_QP,
+        targetTokens: 34,
+        pool: [
+          'typewriter', 'together', 'yesterday', 'whisper', 'perhaps', 'thought',
+          'quality', 'require', 'property', 'authority', 'weight', 'youth',
+          'appropriate', 'territory', 'query', 'pilot',
+        ],
+      },
+    ],
+  },
+  {
+    number: 4,
+    title: 'Lower row',
+    lessons: [
+      {
+        id: '4-1',
+        title: 'N and M',
+        objective: 'Index fingers reach down. The bottom row begins.',
+        introduces: ['n', 'm'],
+        keys: K_NM,
+        targetTokens: 30,
+        pool: [
+          'jnj', 'jmj', 'man', 'men', 'name', 'mean', 'main', 'many', 'nine', 'mine',
+          'human', 'night', 'money', 'moment', 'women', 'morning', 'nothing', 'mountain',
+        ],
+      },
+      {
+        id: '4-2',
+        title: 'C and V',
+        objective: 'Middle and index reach down without dragging the hand.',
+        introduces: ['c', 'v'],
+        keys: K_CV,
+        targetTokens: 30,
+        pool: [
+          'dcd', 'fvf', 'can', 'cave', 'over', 'have', 'give', 'love', 'move', 'once',
+          'come', 'very', 'voice', 'never', 'every', 'cover', 'chance', 'service', 'receive', 'discover',
+        ],
+      },
+      {
+        id: '4-3',
+        title: 'B, X and Z',
+        objective: 'The rare corners. Low mileage, but they have to be there.',
+        introduces: ['b', 'x', 'z'],
+        keys: K_ALL,
+        targetTokens: 30,
+        pool: [
+          'fbf', 'sxs', 'aza', 'box', 'six', 'mix', 'zero', 'size', 'zone', 'lazy',
+          'buzz', 'maybe', 'about', 'extra', 'exact', 'crazy', 'zebra', 'dozen', 'number', 'because',
+        ],
+      },
+      {
+        id: '4-4',
+        title: 'The whole alphabet',
+        objective: 'Every letter on the board, no favourites.',
+        introduces: [],
+        keys: K_ALL,
+        targetTokens: 34,
+        pool: [
+          'quickly', 'example', 'subject', 'amazing', 'freezing', 'complex', 'organize',
+          'jacket', 'objective', 'maximize', 'vibrant', 'squeeze', 'oxygen', 'wizard', 'combine', 'puzzled',
+        ],
+      },
+    ],
+  },
+  {
+    number: 5,
+    title: 'Common words',
+    lessons: [
+      {
+        id: '5-1',
+        title: 'The words you type most',
+        objective: 'The short words that make up half of everything ever written.',
+        introduces: [],
+        keys: K_ALL,
+        targetTokens: 36,
+        pool: [
+          'the', 'and', 'that', 'have', 'for', 'not', 'with', 'you', 'this', 'but',
+          'from', 'they', 'say', 'her', 'she', 'will', 'one', 'all', 'would', 'there',
+          'their', 'what',
+        ],
+      },
+      {
+        id: '5-2',
+        title: 'Longer common words',
+        objective: 'Words with shape. Rhythm over hunting.',
+        introduces: [],
+        keys: K_ALL,
+        targetTokens: 32,
+        pool: [
+          'people', 'because', 'through', 'thought', 'between', 'important', 'different',
+          'together', 'question', 'another', 'sentence', 'example', 'government',
+          'interest', 'remember', 'children',
+        ],
+      },
+      {
+        id: '5-3',
+        title: 'Sprint',
+        objective: 'Everything so far, and the clock is not your friend.',
+        introduces: [],
+        keys: K_ALL,
+        targetTokens: 44,
+        pool: [
+          'world', 'should', 'against', 'himself', 'country', 'problem', 'however',
+          'without', 'national', 'business', 'the', 'and', 'that', 'people', 'because',
+          'through', 'between', 'question', 'different', 'important',
         ],
       },
     ],

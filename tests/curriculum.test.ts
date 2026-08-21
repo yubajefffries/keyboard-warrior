@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { STAGES, judgeLesson, keysTaughtThrough, validateStages } from '../src/curriculum/stages';
+import { STAGES, STAGE_KEYS, judgeLesson, keysTaughtThrough, validateStages } from '../src/curriculum/stages';
+import { STAGE_WPM_FLOOR } from '../src/profile/types';
 import { LESSON_MIN_ACCURACY } from '../src/profile/types';
 
 describe('curriculum content (PRD 11)', () => {
@@ -16,6 +17,46 @@ describe('curriculum content (PRD 11)', () => {
     const taught = keysTaughtThrough(1);
     for (const k of ['a', 's', 'd', 'f', 'j', 'k', 'l', ';']) expect(taught.has(k)).toBe(true);
     expect(taught.has('g')).toBe(false); // G is an index stretch, taught with the upper row
+  });
+
+  it('has every built stage introduce exactly what STAGE_KEYS promises', () => {
+    // STAGE_KEYS drives content filtering and the stage gate; the lessons
+    // drive what is actually taught. If they disagree, a gate can demand
+    // mastery of a key no lesson ever serves.
+    for (const stage of STAGES) {
+      const introduced = new Set(stage.lessons.flatMap((l) => l.introduces));
+      expect([...introduced].sort()).toEqual([...(STAGE_KEYS[stage.number] ?? [])].sort());
+    }
+  });
+
+  it('teaches the full alphabet by the end of Stage 4', () => {
+    const taught = keysTaughtThrough(4);
+    for (const ch of 'abcdefghijklmnopqrstuvwxyz') expect(taught.has(ch)).toBe(true);
+  });
+
+  it('never uses a key outside what has been taught through that stage', () => {
+    for (const stage of STAGES) {
+      const taught = keysTaughtThrough(stage.number);
+      for (const lesson of stage.lessons) {
+        for (const k of lesson.keys) expect(taught.has(k)).toBe(true);
+      }
+    }
+  });
+
+  it('has a WPM floor for every built stage', () => {
+    for (const stage of STAGES) {
+      expect(STAGE_WPM_FLOOR[stage.number]).toBeGreaterThan(0);
+    }
+  });
+
+  it('keeps every lesson playable in one sitting', () => {
+    for (const stage of STAGES) {
+      for (const lesson of stage.lessons) {
+        expect(lesson.pool.length).toBeGreaterThanOrEqual(8); // no memorising a tiny loop
+        expect(lesson.targetTokens).toBeLessThanOrEqual(50); // PRD 11: 3-6 minutes
+        expect(lesson.objective.length).toBeGreaterThan(10);
+      }
+    }
   });
 
   it('introduces every key exactly once', () => {

@@ -399,7 +399,7 @@ function showMenu(): void {
           Switch profile<span class="sub">${store.count} on this browser</span>
         </button>
       </div>
-      ${lesson ? '' : `<p class="note" style="text-align:center;margin-top:20px">Stages 3-10 arrive in later phases. Speed test and practice are open.</p>`}
+      ${lesson ? '' : `<p class="note" style="text-align:center;margin-top:20px">Stages 6-10 arrive in later phases. Speed test is always open.</p>`}
     </div>`);
 
   on('playLearn', startLesson);
@@ -542,10 +542,12 @@ function finishLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
         <div class="rl"><span>Speed</span><b>${Math.round(outcome.wpm)} WPM</b></div>
         <div class="rl"><span>Sequences</span><b>${outcome.tokensCompleted}</b></div>
       </div>
-      ${stageCleared ? `<p class="lead" style="margin-top:18px">Stage ${wasStage} cleared. Export your progress from the Progress screen while you are thinking about it.</p>` : ''}
+      ${stageCleared && advanced ? `<p class="lead" style="margin-top:18px">Stage ${wasStage} cleared. Export your progress from the Progress screen while you are thinking about it.</p>` : ''}
+      ${stageCleared && !advanced ? `<p class="lead" style="margin-top:18px">Stage ${wasStage} cleared &mdash; and that is every stage built so far. Every letter on the board is yours. Speed test is where the numbers go up from here; Stages 6-10 (capitals, punctuation, numbers) arrive in later phases.</p>` : ''}
       ${gate && !gate.ready ? gateBlock(gate) : ''}
       <div class="rowbtns">
-        ${outcome.passed && advanced ? '<button id="nextLesson">Next lesson</button>' : '<button id="retryLesson">Try it again</button>'}
+        ${outcome.passed && advanced ? '<button id="nextLesson">Next lesson</button>' : ''}
+        ${!outcome.passed || (gate !== null && !gate.ready) ? '<button id="retryLesson">Try it again</button>' : ''}
         <button id="resultMenu" class="ghost">Back to menu</button>
       </div>
     </div>`);
