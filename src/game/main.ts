@@ -19,12 +19,15 @@ import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { InputPipeline } from '../input/pipeline';
 import { TypingEngine } from './engine';
 import { StatsTracker } from '../stats/keystats';
-import { HomeRowSource } from '../content/sequences';
+import { HomeRowSource, TokenQueue } from '../content/sequences';
 import { WeaponAudio } from '../audio/sfx';
+import { RobotTypist, judgeBurst, type RobotReport } from '../dev/robot';
 
 // ---------- DOM ----------
 const canvas = document.getElementById('renderCanvas') as HTMLCanvasElement;
 const promptEl = document.getElementById('prompt')!;
+const promptPastEl = document.getElementById('promptPast')!;
+const promptNextEl = document.getElementById('promptNext')!;
 const hudEl = document.getElementById('hud')!;
 const warningsEl = document.getElementById('warnings')!;
 const startOverlay = document.getElementById('startOverlay')!;
@@ -32,6 +35,9 @@ const pauseOverlay = document.getElementById('pauseOverlay')!;
 const pauseReason = document.getElementById('pauseReason')!;
 const deathOverlay = document.getElementById('deathOverlay')!;
 const diagnosisEl = document.getElementById('diagnosis')!;
+const robotPanel = document.getElementById('robotPanel')!;
+const lookaheadValueEl = document.getElementById('lookaheadValue')!;
+const robotWpmValueEl = document.getElementById('robotWpmValue')!;
 
 // ---------- Babylon scene (gray-box) ----------
 const engine3d = new Engine(canvas, true, { preserveDrawingBuffer: false, stencil: false });
@@ -131,6 +137,40 @@ function activeEnemy(): Enemy | null {
   return best;
 }
 
+// ---------- Settings ----------
+/**
+ * Look-ahead: how many upcoming prompts are visible. Reading the next word
+ * only after the current one is destroyed costs a full recognition beat, and
+ * that beat, not finger speed, is what caps you in the 60-100 wpm band.
+ * 0 restores the old one-word-at-a-time behaviour for comparison.
+ */
+const MAX_LOOKAHEAD = 4;
+const LOOKAHEAD_STORAGE_KEY = 'kw.lookahead';
+
+function loadLookahead(): number {
+  try {
+    const raw = localStorage.getItem(LOOKAHEAD_STORAGE_KEY);
+    if (raw === null) return 3;
+    const n = Number.parseInt(raw, 10);
+    return Number.isFinite(n) ? Math.min(MAX_LOOKAHEAD, Math.max(0, n)) : 3;
+  } catch {
+    return 3; // private mode / storage blocked
+  }
+}
+
+let lookahead = loadLookahead();
+
+function setLookahead(n: number): void {
+  lookahead = Math.min(MAX_LOOKAHEAD, Math.max(0, n));
+  try {
+    localStorage.setItem(LOOKAHEAD_STORAGE_KEY, String(lookahead));
+  } catch {
+    /* not worth failing a run over */
+  }
+  lookaheadValueEl.textContent = String(lookahead);
+  renderQueue();
+}
+
 // ---------- Game state ----------
 type GameState = 'start' | 'running' | 'paused' | 'dead';
 let state: GameState = 'start';
@@ -139,6 +179,7 @@ let pausedFrom: GameState = 'running';
 const stats = new StatsTracker();
 const audio = new WeaponAudio();
 const source = new HomeRowSource(Date.now() & 0xffffffff);
+const queue = new TokenQueue(source, MAX_LOOKAHEAD);
 const pipeline = new InputPipeline();
 
 let correctChars = 0;
@@ -147,6 +188,11 @@ let attemptErrors = new Map<string, { errors: number; presses: number }>();
 let errorFlashUntil = 0;
 
 const typing = new TypingEngine(stats, {
+  onPress: (pressed) => {
+    // Deepest tap in the chain: what the game logic actually received. The
+    // burst test compares this against what the robot dispatched.
+    if (robot.running) burstObserved += pressed;
+  },
   onHit: (char) => {
     audio.tick();
     bumpAttempt(char, true);
@@ -163,6 +209,8 @@ const typing = new TypingEngine(stats, {
   onComplete: (token) => {
     correctChars += 1;
     bumpAttempt(token[token.length - 1], true);
+    completed.unshift(token);
+    if (completed.length > 4) completed.pop();
     fireShotgun();
     nextToken();
   },
@@ -192,10 +240,14 @@ pipeline.onWarnings((w) => {
   warningsEl.style.display = msgs.length ? 'block' : 'none';
 });
 
-function nextToken(): void {
-  typing.setToken(source.next());
+const completed: string[] = []; // most recent first, for the trailing column
+
+function nextToken(advance = true): void {
+  if (advance) queue.advance();
+  typing.setToken(queue.current);
   typing.markTokenShown(performance.now());
   renderPrompt();
+  renderQueue();
 }
 
 function renderPrompt(): void {
@@ -208,6 +260,21 @@ function renderPrompt(): void {
     `<span class="current">${escapeHtml(current)}</span>` +
     `<span>${escapeHtml(rest)}</span>` +
     `<span class="errIcon">&#10006;</span>`;
+}
+
+/**
+ * Only redrawn when a token retires, not per keystroke: at 200 wpm the prompt
+ * itself is rewritten ~17 times a second and the queue must not add to that.
+ */
+function renderQueue(): void {
+  promptNextEl.innerHTML = queue
+    .upcoming(lookahead)
+    .map((t, i) => `<span class="q q${i}">${escapeHtml(t)}</span>`)
+    .join('');
+  promptPastEl.innerHTML = completed
+    .slice(0, 2)
+    .map((t) => `<span>${escapeHtml(t)}</span>`)
+    .join('');
 }
 
 function escapeHtml(s: string): string {
@@ -229,9 +296,87 @@ function fireShotgun(): void {
   }
 }
 
+// ---------- Robot burst test ----------
+/**
+ * You cannot hold 100+ wpm on demand, and while you are trying you cannot tell
+ * a dropped keystroke from your own typo. The robot types the real game at an
+ * exact rate through the real input pipeline, then reports whether anything
+ * was dropped, how long each keystroke cost the main thread, and whether any
+ * frame hitched. Watch the screen while it runs: that is the "did it glitch"
+ * answer that headless numbers cannot give.
+ */
+const ROBOT_SPEEDS = [80, 100, 120, 150, 200];
+const BURST_CHARS = 200;
+let robotSpeedIndex = 1; // 100 wpm
+let burstSent = '';
+let burstObserved = '';
+let lastBurst: { report: RobotReport; expected: string; observed: string } | null = null;
+
+const robot = new RobotTypist({
+  nextChar: () => (state === 'running' ? typing.expectedChar || null : null),
+  onSample: (s) => {
+    burstSent += s.sent;
+  },
+  onFinish: (report) => {
+    lastBurst = { report, expected: burstSent, observed: burstObserved };
+    renderBurstReport();
+  },
+});
+
+function startBurst(): void {
+  if (state !== 'running') {
+    showRobotMessage('Start the encounter first: the robot types what the game asks for.');
+    return;
+  }
+  burstSent = '';
+  burstObserved = '';
+  robotPanel.style.display = 'none';
+  robot.start({
+    wpm: ROBOT_SPEEDS[robotSpeedIndex],
+    chars: BURST_CHARS,
+    // A metronome is not typing: 12% jitter and a few deliberate errors make
+    // the run exercise the miss-and-retry path the way a fast human would.
+    jitterPct: 12,
+    errorRate: 0.04,
+    seed: 20260821,
+  });
+}
+
+function showRobotMessage(msg: string): void {
+  robotPanel.style.display = 'block';
+  robotPanel.innerHTML = `<h3>ROBOT BURST</h3><div class="foot">${escapeHtml(msg)}</div>`;
+}
+
+function renderBurstReport(): void {
+  if (!lastBurst) return;
+  const { report, expected, observed } = lastBurst;
+  // Injected errors are dispatched on purpose, so they belong in the expected
+  // string: the check is "every key I sent arrived", not "every key was right".
+  const verdict = judgeBurst(report, { expected, observed });
+  robotPanel.style.display = 'block';
+  robotPanel.innerHTML =
+    `<h3>ROBOT BURST &mdash; ${report.wpm} WPM &times; ${report.sent} KEYS</h3>` +
+    `<div class="verdict ${verdict.pass ? 'pass' : 'fail'}">` +
+    `${verdict.pass ? 'PASS' : 'FAIL'} &mdash; the game kept up at ${report.achievedWpm.toFixed(0)} wpm` +
+    `</div>` +
+    verdict.lines
+      .map(
+        (l) =>
+          `<div class="line"><div class="head"><span>${escapeHtml(l.label)}</span>` +
+          `<b><span class="mark ${l.pass ? 'ok' : 'bad'}">${l.pass ? '✓' : '✖'}</span> ` +
+          `${escapeHtml(l.value)}</b></div>` +
+          `<div class="detail">${escapeHtml(l.detail)}</div></div>`,
+      )
+      .join('') +
+    `<div class="foot">${report.injectedErrors} deliberate typos, ${report.starvedSlots} idle slots. ` +
+    `Synthetic events: this proves the app keeps up, not that the OS never drops a key. ` +
+    `F9 to run again, Esc then Export for the JSON.</div>`;
+}
+
 // ---------- Overlays / state transitions ----------
 function pause(reason: string): void {
   if (state !== 'running') return;
+  if (robot.running) robot.stop(); // a burst measured across a pause is noise
   pausedFrom = state;
   state = 'paused';
   typing.setEnabled(false);
@@ -248,6 +393,7 @@ function resume(): void {
 
 function die(): void {
   state = 'dead';
+  if (robot.running) robot.stop();
   typing.setEnabled(false);
   let worst: { key: string; acc: number; presses: number } | null = null;
   for (const [key, row] of attemptErrors) {
@@ -265,9 +411,12 @@ function resetEncounter(): void {
   for (const e of enemies) if (e.alive) e.mesh.dispose();
   enemies.length = 0;
   attemptErrors = new Map();
+  completed.length = 0;
   spawnEnemy();
   spawnEnemy();
-  nextToken();
+  // The queue already holds an unstarted token; keep it so the words shown as
+  // "coming up" on the death screen are the words that actually arrive.
+  nextToken(typing.typedCount > 0);
 }
 
 document.getElementById('startBtn')!.addEventListener('click', () => {
@@ -287,14 +436,37 @@ document.getElementById('retryBtn')!.addEventListener('click', () => {
   typing.setEnabled(true);
   resetEncounter();
 });
-document.getElementById('exportBtn')!.addEventListener('click', () => {
-  const blob = new Blob([stats.exportJSON()], { type: 'application/json' });
+function download(name: string, text: string): void {
+  const blob = new Blob([text], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'keyboard-warrior-stats.json';
+  a.download = name;
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+document.getElementById('exportBtn')!.addEventListener('click', () => {
+  download('keyboard-warrior-stats.json', stats.exportJSON());
 });
+document.getElementById('exportBurstBtn')!.addEventListener('click', () => {
+  if (!lastBurst) return;
+  download(
+    `keyboard-warrior-burst-${lastBurst.report.wpm}wpm-${Date.now()}.json`,
+    JSON.stringify(
+      {
+        schemaVersion: 1,
+        userAgent: navigator.userAgent,
+        exportedAt: new Date().toISOString(),
+        note: 'Synthetic in-page events. Proves the app keeps up, not the OS input path.',
+        ...lastBurst,
+      },
+      null,
+      2,
+    ),
+  );
+});
+document.getElementById('lookaheadUp')!.addEventListener('click', () => setLookahead(lookahead + 1));
+document.getElementById('lookaheadDown')!.addEventListener('click', () => setLookahead(lookahead - 1));
 
 // Pause on blur (PRD: force pause on blur, resume is explicit).
 window.addEventListener('blur', () => pause('Window lost focus.'));
@@ -304,14 +476,32 @@ document.addEventListener('visibilitychange', () => {
 document.addEventListener('fullscreenchange', () => {
   if (!document.fullscreenElement) pause('Left fullscreen.');
 });
+// Dev/settings keys. F-keys only: the typing engine ignores them, and these
+// three are the ones no major browser has already claimed (F1 help, F3 find,
+// F10 menu bar, F11 fullscreen, F12 devtools are all off limits).
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && state === 'running') pause('Paused.');
+  if (e.key === 'F2') {
+    e.preventDefault();
+    setLookahead(lookahead >= MAX_LOOKAHEAD ? 0 : lookahead + 1);
+  }
+  if (e.key === 'F4') {
+    e.preventDefault();
+    robotSpeedIndex = (robotSpeedIndex + 1) % ROBOT_SPEEDS.length;
+    robotWpmValueEl.textContent = String(ROBOT_SPEEDS[robotSpeedIndex]);
+  }
+  if (e.key === 'F9') {
+    e.preventDefault();
+    if (robot.running) robot.stop();
+    else startBurst();
+  }
 });
 
 pipeline.attach(window);
 
 // ---------- Per-frame ----------
 let spawnTimer = 0;
+let hudLine = '';
 scene.onBeforeRenderObservable.add(() => {
   const dt = engine3d.getDeltaTime() / 1000;
 
@@ -354,8 +544,22 @@ scene.onBeforeRenderObservable.add(() => {
 
   const acc = Math.round(stats.totalAccuracy('combat') * 100);
   const wpm = Math.round(StatsTracker.wpm(correctChars, activeMs));
-  hudEl.innerHTML = `WPM ${wpm} &nbsp; ACC ${acc}% &nbsp; FPS ${Math.round(engine3d.getFps())}`;
+  const fps = Math.round(engine3d.getFps());
+  const line =
+    `WPM ${wpm} &nbsp; ACC ${acc}% &nbsp; FPS ${fps}` +
+    (robot.running ? ` &nbsp; <span style="color:#e8b04a">ROBOT ${robot.config.wpm}</span>` : '');
+  // Rewriting the HUD every frame would show up in the very burst numbers the
+  // robot is measuring, so only touch the DOM when the text actually changes.
+  if (line !== hudLine) {
+    hudLine = line;
+    hudEl.innerHTML = line;
+  }
 });
 
 engine3d.runRenderLoop(() => scene.render());
 window.addEventListener('resize', () => engine3d.resize());
+
+// ---------- Init ----------
+lookaheadValueEl.textContent = String(lookahead);
+robotWpmValueEl.textContent = String(ROBOT_SPEEDS[robotSpeedIndex]);
+renderQueue();

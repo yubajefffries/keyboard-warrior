@@ -11,9 +11,11 @@ npm install
 npm run dev
 ```
 
-- `/` is the Phase 0 encounter: gray-box corridor, capsule infected, pump shotgun, home-row content. Type the prompt to fire. Wrong key is a dry-fire; backspace does nothing in combat.
+- `/` is the Phase 0 encounter: gray-box corridor, capsule infected, pump shotgun, home-row content. Type the prompt to fire. Wrong key is a dry-fire; backspace does nothing in combat. The next words sit to the right of the active one so you can read ahead: `F2` cycles how many (0-4).
 - `/harness/input-fidelity.html` is the Input Fidelity Test harness (PRD 3.1). Run it in Chrome, Edge, and Firefox and export a log per browser into `docs/input-fidelity-logs/`.
 - `/harness/legibility.html` is the Text Legibility harness (PRD 3.2): worst-case fog, motion, and flash behind the real prompt renderer with a measured WCAG contrast ratio.
+
+- The robot typist plays the game for you at an exact speed so 100+ WPM can be tested without being able to type 100+ WPM: `F9` runs a burst, `F4` picks 80-200 WPM. Same test lives in the harness (panel 2) for a renderer-free run. What it proves and what it cannot: `docs/BURST_TESTING.md`.
 
 `npm test` runs the unit tests for the input-independent core (typing engine, stats, content). `npm run build` type-checks and bundles all three pages.
 
@@ -24,6 +26,7 @@ npm run dev
 - Errors log once against the expected key; the pressed key feeds the confusion matrix. Corrections never erase errors.
 - Repeats never advance combat text. Modifier chords are ignored. Caps Lock and stuck Shift are surfaced, never silently rewritten.
 - Blur pauses the game; resume is an explicit click or Space.
+- Upcoming prompts come from a `TokenQueue`, so what is drawn as "coming up" is exactly what arrives. The display can never promise a word the source then changes.
 
 ## Phase 0 exit gates (all must be green before Phase 1a)
 

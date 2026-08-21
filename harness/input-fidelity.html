@@ -20,6 +20,18 @@
     .stat { display: inline-block; margin-right: 26px; }
     .stat b { color: #fff; }
     #held { color: #7ec8ff; }
+    label { color: #9aa0a6; }
+    select, input { background: #101114; color: #d7dadd; border: 1px solid #3a3d42;
+                    border-radius: 4px; padding: 5px 8px; font-family: inherit; }
+    .verdict { font-size: 16px; font-weight: bold; margin-bottom: 8px; }
+    .verdict.pass { color: #6dc26d; }
+    .verdict.fail { color: #ff5449; }
+    .bline { border-top: 1px solid #26282d; padding: 6px 0; max-width: 900px; }
+    .bline .head { display: flex; justify-content: space-between; gap: 16px; }
+    .bline .head b { color: #fff; }
+    .bline .mark.ok { color: #6dc26d; }
+    .bline .mark.bad { color: #ff5449; }
+    .bline .detail { color: #8a8f95; font-size: 12px; margin-top: 2px; }
   </style>
 </head>
 <body>
@@ -36,7 +48,28 @@
   </div>
 
   <div class="panel">
-    <h2>2. Live status</h2>
+    <h2>2. Robot burst: 100+ WPM without a human</h2>
+    <p>Nobody can hold 100 WPM on demand, and while trying you cannot tell a dropped event from
+       your own typo. This fires synthetic keydown/keyup pairs at an exact rate through the same
+       <code>InputPipeline</code> the game uses, then checks that every one arrived, once, in order.
+       <b>Limit:</b> synthetic events enter at <code>dispatchEvent</code>, so this proves the app
+       layer keeps up. It cannot prove the OS &rarr; browser path never drops a real key; that half
+       still needs fingers (panel 1) or a CDP-level driver.</p>
+    <label>Speed <select id="burstWpm">
+      <option>80</option><option selected>100</option><option>120</option>
+      <option>150</option><option>200</option><option>250</option>
+    </select> wpm</label>
+    &nbsp;&nbsp;
+    <label>Keys <input id="burstChars" type="number" value="300" min="20" max="5000" style="width:80px" /></label>
+    &nbsp;&nbsp;
+    <label>Jitter <input id="burstJitter" type="number" value="12" min="0" max="50" style="width:60px" /> %</label>
+    &nbsp;&nbsp;
+    <button id="burstRun">Run burst</button>
+    <div id="burstResult" style="margin-top:12px"></div>
+  </div>
+
+  <div class="panel">
+    <h2>3. Live status</h2>
     <span class="stat">Events: <b id="count">0</b></span>
     <span class="stat">Repeats seen (ignored by game): <b id="repeats">0</b></span>
     <span class="stat">Observed timestamp resolution: <b id="resolution">n/a</b></span>
@@ -46,7 +79,7 @@
   </div>
 
   <div class="panel">
-    <h2>3. Focus resilience</h2>
+    <h2>4. Focus resilience</h2>
     <p>Alt-tab away mid-typing, click another window, come back, keep typing.
        Held-key state clears on blur; there must be no phantom characters and no stuck keys.
        Blur events are recorded in the exported log.</p>
@@ -54,7 +87,7 @@
   </div>
 
   <div class="panel">
-    <h2>4. Export</h2>
+    <h2>5. Export</h2>
     <button id="export">Export full log JSON</button>
     <p>Includes user agent, observed resolution, all events with seq / key / code / repeat / modifiers / timeStamp / frameTime.</p>
   </div>

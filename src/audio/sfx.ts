@@ -7,9 +7,13 @@
  * behind the same interface; see LICENSES.md.
  */
 
+/** One second of noise, reused by every shot. */
+const NOISE_SECONDS = 1;
+
 export class WeaponAudio {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  private noise: AudioBuffer | null = null;
 
   /** Must be called from a user gesture (browser autoplay policy). */
   ensureStarted(): void {
@@ -23,11 +27,18 @@ export class WeaponAudio {
     this.master.connect(this.ctx.destination);
   }
 
-  private noiseBuffer(durationS: number): AudioBuffer {
+  /**
+   * Built once, then replayed from a random offset. Filling a fresh buffer per
+   * shot meant ~17k Math.random() calls on the main thread every time the gun
+   * fired; at burst typing speeds that is a frame hitch you can hear.
+   */
+  private noiseBuffer(): AudioBuffer {
+    if (this.noise) return this.noise;
     const ctx = this.ctx!;
-    const buf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * durationS), ctx.sampleRate);
+    const buf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * NOISE_SECONDS), ctx.sampleRate);
     const data = buf.getChannelData(0);
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    this.noise = buf;
     return buf;
   }
 
@@ -44,7 +55,8 @@ export class WeaponAudio {
     const ctx = this.ctx;
     const t0 = ctx.currentTime + (opts.delay ?? 0);
     const src = ctx.createBufferSource();
-    src.buffer = this.noiseBuffer(opts.duration);
+    src.buffer = this.noiseBuffer();
+    const offset = Math.random() * Math.max(0, NOISE_SECONDS - opts.duration);
     const filter = ctx.createBiquadFilter();
     filter.type = opts.filterType;
     filter.frequency.value = opts.freq;
@@ -53,8 +65,7 @@ export class WeaponAudio {
     g.gain.setValueAtTime(opts.gain, t0);
     g.gain.exponentialRampToValueAtTime(0.001, t0 + opts.decay);
     src.connect(filter).connect(g).connect(this.master);
-    src.start(t0);
-    src.stop(t0 + opts.duration);
+    src.start(t0, offset, opts.duration);
   }
 
   private playTone(opts: {

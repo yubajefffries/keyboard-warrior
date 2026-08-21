@@ -4,6 +4,7 @@
  */
 
 import { InputPipeline, type KeyRecord } from '../input/pipeline';
+import { RobotTypist, judgeBurst, type RobotReport } from '../dev/robot';
 
 const TARGET = 'the quick brown fox jumps over the lazy dog; pack my box with five dozen jugs';
 
@@ -13,6 +14,12 @@ const blurLog: number[] = [];
 let typed = '';
 let repeats = 0;
 const held = new Set<string>();
+
+// Burst capture is kept separate from the manual drill so a robot run never
+// pollutes the hand-typed panel above it.
+let burstSent = '';
+let burstObserved = '';
+let lastBurst: { report: RobotReport; expected: string; observed: string } | null = null;
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -53,6 +60,13 @@ function renderRow(r: KeyRecord): void {
 }
 
 pipeline.subscribe((r) => {
+  if (robot.running) {
+    // Fast path during a burst: record what arrived and nothing else. Building
+    // 600 table rows mid-run would be measuring the harness, not the pipeline.
+    if (r.type === 'down' && !r.repeat && r.key.length === 1) burstObserved += r.key;
+    events.push(r);
+    return;
+  }
   events.push(r);
   renderRow(r);
   $('count').textContent = String(events.length);
@@ -83,6 +97,59 @@ window.addEventListener('blur', () => {
   $('held').textContent = 'none';
 });
 
+// ---------- Robot burst (PRD 3.1: the 100+ WPM gate) ----------
+const robot = new RobotTypist({
+  // Cycle the pangram: it covers every letter plus the semicolon, so a drop
+  // cannot hide in a key the drill never presses.
+  nextChar: () => TARGET[burstSent.length % TARGET.length],
+  onSample: (s) => {
+    burstSent += s.sent;
+  },
+  onFinish: (report) => {
+    lastBurst = { report, expected: burstSent, observed: burstObserved };
+    renderBurst();
+    ($('burstRun') as HTMLButtonElement).disabled = false;
+    ($('burstRun') as HTMLButtonElement).textContent = 'Run burst';
+    $('count').textContent = String(events.length);
+  },
+});
+
+function renderBurst(): void {
+  if (!lastBurst) return;
+  const { report, expected, observed } = lastBurst;
+  const verdict = judgeBurst(report, { expected, observed });
+  $('burstResult').innerHTML =
+    `<div class="verdict ${verdict.pass ? 'pass' : 'fail'}">` +
+    `${verdict.pass ? 'PASS' : 'FAIL'} &mdash; ${report.sent} keys at ` +
+    `${report.achievedWpm.toFixed(1)} wpm (asked ${report.wpm})</div>` +
+    verdict.lines
+      .map(
+        (l) =>
+          `<div class="bline"><div class="head"><span>${escapeHtml(l.label)}</span>` +
+          `<b><span class="mark ${l.pass ? 'ok' : 'bad'}">${l.pass ? '✓' : '✖'}</span> ` +
+          `${escapeHtml(l.value)}</b></div>` +
+          `<div class="detail">${escapeHtml(l.detail)}</div></div>`,
+      )
+      .join('');
+}
+
+$('burstRun').addEventListener('click', () => {
+  if (robot.running) return;
+  burstSent = '';
+  burstObserved = '';
+  const btn = $('burstRun') as HTMLButtonElement;
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  $('burstResult').innerHTML = '';
+  robot.start({
+    wpm: Number(($('burstWpm') as HTMLSelectElement).value),
+    chars: Number(($('burstChars') as HTMLInputElement).value),
+    jitterPct: Number(($('burstJitter') as HTMLInputElement).value),
+    errorRate: 0,
+    seed: 20260821,
+  });
+});
+
 $('resetCompare').addEventListener('click', () => {
   typed = '';
   renderCompare();
@@ -96,6 +163,15 @@ $('export').addEventListener('click', () => {
     observedTimestampResolutionMs: pipeline.observedTimestampResolution(),
     blurTimestamps: blurLog,
     drill: { target: TARGET, typed },
+    burst: lastBurst
+      ? {
+          note: 'Synthetic in-page events: proves the app layer keeps up, not the OS input path.',
+          report: lastBurst.report,
+          dispatched: lastBurst.expected,
+          received: lastBurst.observed,
+          lossless: lastBurst.expected === lastBurst.observed,
+        }
+      : null,
     events,
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });

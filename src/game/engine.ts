@@ -11,6 +11,13 @@ import type { KeyRecord } from '../input/types';
 import { StatsTracker, type StatContext } from '../stats/keystats';
 
 export interface EngineEvents {
+  /**
+   * Every keypress the engine accepted as a typing press, hit or miss, before
+   * the hit/miss event fires. This is the deepest point in the chain, so a
+   * burst test that compares dispatched keys against these catches a drop
+   * anywhere between the OS and the game logic.
+   */
+  onPress?: (pressed: string, expected: string, correct: boolean) => void;
   /** A correct keypress that is not yet the end of the token. */
   onHit?: (char: string) => void;
   /** A wrong keypress. expected/pressed for the confusion matrix. */
@@ -86,6 +93,8 @@ export class TypingEngine {
       this.tokenStartTime !== null && this.index === 0 ? now - this.tokenStartTime : null;
     const interKey = this.lastKeyTime !== null ? now - this.lastKeyTime : null;
     this.lastKeyTime = now;
+
+    this.events.onPress?.(record.key, expected, record.key === expected);
 
     if (record.key === expected) {
       this.stats.recordPress(expected, record.key, true, this.context, interKey, firstKeyLatency);

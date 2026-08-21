@@ -10,17 +10,64 @@
       --prompt-done: #6dc26d;
       --prompt-bg: rgba(10, 10, 12, 0.82);
       --error: #ff5449;
+      --queue-next: #cfd3d8;
+      --queue-far: #9aa0a6;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
     #renderCanvas { width: 100%; height: 100%; display: block; outline: none; }
 
+    /*
+      Prompt row: [done words] [ACTIVE] [coming up].
+      Three columns with equal 1fr sides keep the active word dead centre no
+      matter how wide the neighbours are, so the eye never has to re-find it.
+    */
+    #promptRow {
+      position: fixed;
+      left: 0; right: 0;
+      bottom: 18%;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: 28px;
+      z-index: 10;
+      pointer-events: none;
+      font-family: 'Consolas', 'Menlo', monospace;
+    }
+    #promptPast, #promptNext {
+      overflow: hidden;
+      white-space: nowrap;
+      letter-spacing: 0.1em;
+      display: flex;
+      gap: 22px;
+      align-items: baseline;
+    }
+    /*
+      Completed words trail off to the left. row-reverse (not direction:rtl,
+      which also flips justify-content) puts the most recent one next to the
+      active prompt and clips the oldest at the far edge.
+    */
+    #promptPast {
+      flex-direction: row-reverse;
+      justify-content: flex-start;
+      font-size: 26px;
+      color: #4d5157; /* dimmer than any upcoming word: the eye should pull forward */
+      -webkit-mask-image: linear-gradient(to left, #000 72%, transparent 100%);
+      mask-image: linear-gradient(to left, #000 72%, transparent 100%);
+    }
+    #promptNext {
+      justify-content: flex-start;
+      -webkit-mask-image: linear-gradient(to right, #000 72%, transparent 100%);
+      mask-image: linear-gradient(to right, #000 72%, transparent 100%);
+    }
+    /* Size and brightness fall off with distance: reading order without arrows. */
+    #promptNext .q0 { font-size: 36px; color: var(--queue-next); }
+    #promptNext .q1 { font-size: 30px; color: var(--queue-far); }
+    #promptNext .q2 { font-size: 26px; color: #7c8188; }
+    #promptNext .q3 { font-size: 24px; color: #686d73; }
+
     /* Screen-space prompt. Recoil and camera motion never touch this layer. */
     #prompt {
-      position: fixed;
-      left: 50%;
-      bottom: 18%;
-      transform: translateX(-50%);
       background: var(--prompt-bg);
       border: 1px solid #333;
       border-radius: 10px;
@@ -71,30 +118,96 @@
       margin-top: 20px; font-size: 16px; padding: 10px 26px; cursor: pointer;
       background: #7a1f1a; color: #fff; border: 1px solid #a33; border-radius: 6px;
     }
+    .overlay .settings {
+      margin-top: 22px; border-top: 1px solid #333; padding-top: 16px;
+      font-size: 15px; color: #b9bdc2; min-width: 460px;
+    }
+    .overlay .settings .row {
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 20px; padding: 5px 0;
+    }
+    .overlay .settings .row b { color: #fff; font-family: Consolas, monospace; }
+    .overlay .settings .key {
+      font-family: Consolas, monospace; font-size: 13px; color: #8a8f95;
+      border: 1px solid #3a3d42; border-radius: 4px; padding: 1px 6px;
+    }
+    .overlay .settings .small { margin-top: 20px; font-size: 15px; }
+    .overlay .settings .small button { margin-top: 0; font-size: 14px; padding: 6px 14px; }
+
+    /* Robot burst report. Deliberately a HUD panel, not an overlay: the run
+       is meant to be watched, and the verdict read straight after. */
+    #robotPanel {
+      position: fixed; top: 14px; right: 16px; z-index: 30; display: none;
+      width: 430px; text-align: left;
+      font-family: Consolas, Menlo, monospace; font-size: 13px; line-height: 1.5;
+      background: rgba(10,10,12,0.94); border: 1px solid #2a2c31; border-radius: 8px;
+      padding: 12px 16px; color: #d7dadd;
+    }
+    #robotPanel h3 { font-size: 14px; margin-bottom: 8px; color: #e8b04a; }
+    #robotPanel .verdict { font-size: 16px; font-weight: bold; margin-bottom: 10px; }
+    #robotPanel .verdict.pass { color: #6dc26d; }
+    #robotPanel .verdict.fail { color: #ff5449; }
+    #robotPanel .line { border-top: 1px solid #26282d; padding: 6px 0; }
+    #robotPanel .line .head { display: flex; justify-content: space-between; gap: 12px; }
+    #robotPanel .line .head b { color: #fff; }
+    #robotPanel .line .mark.ok { color: #6dc26d; }
+    #robotPanel .line .mark.bad { color: #ff5449; }
+    #robotPanel .line .detail { color: #8a8f95; font-size: 12px; margin-top: 2px; }
+    #robotPanel .foot { margin-top: 10px; color: #8a8f95; font-size: 12px; }
   </style>
 </head>
 <body>
   <canvas id="renderCanvas"></canvas>
 
-  <div id="prompt" aria-live="polite"></div>
+  <div id="promptRow">
+    <div id="promptPast" aria-hidden="true"></div>
+    <div id="prompt" aria-live="polite"></div>
+    <div id="promptNext" aria-hidden="true"></div>
+  </div>
 
   <div id="hud"></div>
   <div id="warnings"></div>
+  <div id="robotPanel"></div>
 
   <div class="overlay" id="startOverlay" style="display:flex">
     <h1>KEYBOARD WARRIOR</h1>
     <p>Type like your life depends on it.</p>
     <p>Phase 0 vertical slice: gray-box, home row, pump shotgun.</p>
     <p>Type the prompt to fire. Wrong key = dry fire. Backspace does nothing.</p>
+    <p>The next words are queued to the right of the one you are typing: read ahead.</p>
     <button id="startBtn">Click to start</button>
     <p class="hint">Audio starts on click (browser policy). US QWERTY, physical keyboard.</p>
+    <p class="hint">F2 words ahead &nbsp;|&nbsp; F4 robot speed &nbsp;|&nbsp; F9 robot burst &nbsp;|&nbsp; Esc pause</p>
   </div>
 
   <div class="overlay" id="pauseOverlay">
     <h1>PAUSED</h1>
     <p id="pauseReason">Window lost focus.</p>
     <button id="resumeBtn">Resume (or press Space)</button>
-    <button id="exportBtn" style="background:#26323f;border-color:#456;">Export stats JSON</button>
+
+    <div class="settings">
+      <div class="row">
+        <span>Words shown ahead of the one you are typing</span>
+        <span>
+          <button id="lookaheadDown" style="margin:0;padding:2px 10px;background:#26323f;border-color:#456;">&minus;</button>
+          <b id="lookaheadValue" style="display:inline-block;min-width:22px;text-align:center;">3</b>
+          <button id="lookaheadUp" style="margin:0;padding:2px 10px;background:#26323f;border-color:#456;">+</button>
+          <span class="key">F2</span>
+        </span>
+      </div>
+      <div class="row">
+        <span>Robot burst speed (types for you, to test the game at speed)</span>
+        <span><b id="robotWpmValue">100</b> wpm <span class="key">F4</span></span>
+      </div>
+      <div class="row">
+        <span>Run a 200-key burst at that speed</span>
+        <span><span class="key">F9</span> starts / stops</span>
+      </div>
+      <div class="row small">
+        <button id="exportBtn" style="background:#26323f;border-color:#456;">Export stats JSON</button>
+        <button id="exportBurstBtn" style="background:#26323f;border-color:#456;">Export last burst JSON</button>
+      </div>
+    </div>
   </div>
 
   <div class="overlay" id="deathOverlay">
