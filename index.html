@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Keyboard Warrior (Phase 0)</title>
+  <style>
+    :root {
+      --prompt-fg: #ffffff;
+      --prompt-done: #6dc26d;
+      --prompt-bg: rgba(10, 10, 12, 0.82);
+      --error: #ff5449;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+    #renderCanvas { width: 100%; height: 100%; display: block; outline: none; }
+
+    /* Screen-space prompt. Recoil and camera motion never touch this layer. */
+    #prompt {
+      position: fixed;
+      left: 50%;
+      bottom: 18%;
+      transform: translateX(-50%);
+      background: var(--prompt-bg);
+      border: 1px solid #333;
+      border-radius: 10px;
+      padding: 18px 42px;
+      font-family: 'Consolas', 'Menlo', monospace;
+      font-size: 56px;
+      letter-spacing: 0.12em;
+      color: var(--prompt-fg);
+      white-space: pre;
+      user-select: none;
+      z-index: 10;
+    }
+    #prompt .done { color: var(--prompt-done); }
+    #prompt .current {
+      text-decoration: underline;
+      text-underline-offset: 8px;
+    }
+    /* Error state: weight + underline style + icon, not color alone. */
+    #prompt.error .current {
+      color: var(--error);
+      font-weight: 700;
+      text-decoration: underline wavy;
+    }
+    #prompt .errIcon { display: none; font-size: 30px; vertical-align: middle; margin-left: 14px; }
+    #prompt.error .errIcon { display: inline; color: var(--error); }
+
+    #hud {
+      position: fixed; top: 14px; left: 16px; z-index: 10;
+      font-family: 'Consolas', monospace; font-size: 15px; color: #cfd2d6;
+      background: rgba(10,10,12,0.6); padding: 8px 14px; border-radius: 8px;
+      line-height: 1.6;
+    }
+    #warnings {
+      position: fixed; top: 14px; right: 16px; z-index: 10; display: none;
+      font-family: 'Consolas', monospace; font-size: 15px; color: #ffb84d;
+      background: rgba(40,25,0,0.8); padding: 8px 14px; border-radius: 8px;
+    }
+    .overlay {
+      position: fixed; inset: 0; z-index: 20; display: none;
+      align-items: center; justify-content: center; flex-direction: column;
+      background: rgba(0,0,0,0.78); color: #eee; text-align: center;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+    .overlay h1 { font-size: 44px; margin-bottom: 12px; letter-spacing: 0.06em; }
+    .overlay p { font-size: 18px; color: #b9bdc2; margin-bottom: 8px; }
+    .overlay .hint { margin-top: 18px; font-size: 16px; color: #8a8f95; }
+    .overlay button {
+      margin-top: 20px; font-size: 16px; padding: 10px 26px; cursor: pointer;
+      background: #7a1f1a; color: #fff; border: 1px solid #a33; border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="renderCanvas"></canvas>
+
+  <div id="prompt" aria-live="polite"></div>
+
+  <div id="hud"></div>
+  <div id="warnings"></div>
+
+  <div class="overlay" id="startOverlay" style="display:flex">
+    <h1>KEYBOARD WARRIOR</h1>
+    <p>Type like your life depends on it.</p>
+    <p>Phase 0 vertical slice: gray-box, home row, pump shotgun.</p>
+    <p>Type the prompt to fire. Wrong key = dry fire. Backspace does nothing.</p>
+    <button id="startBtn">Click to start</button>
+    <p class="hint">Audio starts on click (browser policy). US QWERTY, physical keyboard.</p>
+  </div>
+
+  <div class="overlay" id="pauseOverlay">
+    <h1>PAUSED</h1>
+    <p id="pauseReason">Window lost focus.</p>
+    <button id="resumeBtn">Resume (or press Space)</button>
+    <button id="exportBtn" style="background:#26323f;border-color:#456;">Export stats JSON</button>
+  </div>
+
+  <div class="overlay" id="deathOverlay">
+    <h1>THEY REACHED YOU</h1>
+    <p id="diagnosis"></p>
+    <button id="retryBtn">Retry from checkpoint</button>
+  </div>
+
+  <script type="module" src="/src/game/main.ts"></script>
+</body>
+</html>

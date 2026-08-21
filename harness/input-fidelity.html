@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Input Fidelity Harness</title>
+  <style>
+    body { background: #101114; color: #d7dadd; font-family: Consolas, Menlo, monospace; margin: 0; padding: 24px; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    p { color: #9aa0a6; max-width: 900px; }
+    .panel { background: #17181c; border: 1px solid #2a2c31; border-radius: 8px; padding: 14px 18px; margin-top: 14px; }
+    .panel h2 { font-size: 15px; margin: 0 0 8px; color: #e8b04a; }
+    #typedCompare { font-size: 22px; letter-spacing: 0.08em; white-space: pre-wrap; }
+    #typedCompare .ok { color: #6dc26d; }
+    #typedCompare .bad { color: #ff5449; font-weight: bold; }
+    #typedCompare .pending { color: #55585e; }
+    table { border-collapse: collapse; font-size: 12px; width: 100%; }
+    th, td { border-bottom: 1px solid #26282d; padding: 2px 8px; text-align: left; }
+    th { color: #8a8f95; }
+    button { background: #26323f; color: #fff; border: 1px solid #456; border-radius: 5px; padding: 6px 14px; cursor: pointer; font-family: inherit; }
+    .stat { display: inline-block; margin-right: 26px; }
+    .stat b { color: #fff; }
+    #held { color: #7ec8ff; }
+  </style>
+</head>
+<body>
+  <h1>Input Fidelity Harness (PRD 3.1)</h1>
+  <p>Every keyboard event on this page is logged with sequence number, timestamps, and frame time.
+     The input layer here is the same module the game uses and does not depend on the renderer.
+     Run in Chrome, Edge, and Firefox; export the log and file it in <code>docs/input-fidelity-logs/</code>.</p>
+
+  <div class="panel">
+    <h2>1. Lossless capture + ordering: type this line at full speed</h2>
+    <div id="typedCompare"></div>
+    <p id="compareResult"></p>
+    <button id="resetCompare">Reset drill</button>
+  </div>
+
+  <div class="panel">
+    <h2>2. Live status</h2>
+    <span class="stat">Events: <b id="count">0</b></span>
+    <span class="stat">Repeats seen (ignored by game): <b id="repeats">0</b></span>
+    <span class="stat">Observed timestamp resolution: <b id="resolution">n/a</b></span>
+    <span class="stat">Caps Lock: <b id="caps">off</b></span>
+    <br /><br />
+    <span class="stat">Held codes (rollover check, hold 2-3 keys): <b id="held">none</b></span>
+  </div>
+
+  <div class="panel">
+    <h2>3. Focus resilience</h2>
+    <p>Alt-tab away mid-typing, click another window, come back, keep typing.
+       Held-key state clears on blur; there must be no phantom characters and no stuck keys.
+       Blur events are recorded in the exported log.</p>
+    <span class="stat">Blur count: <b id="blurs">0</b></span>
+  </div>
+
+  <div class="panel">
+    <h2>4. Export</h2>
+    <button id="export">Export full log JSON</button>
+    <p>Includes user agent, observed resolution, all events with seq / key / code / repeat / modifiers / timeStamp / frameTime.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Recent events</h2>
+    <table>
+      <thead><tr><th>seq</th><th>type</th><th>key</th><th>code</th><th>rpt</th><th>mods</th><th>timeStamp</th><th>frameTime</th></tr></thead>
+      <tbody id="log"></tbody>
+    </table>
+  </div>
+
+  <script type="module" src="/src/harness/input-fidelity.ts"></script>
+</body>
+</html>
