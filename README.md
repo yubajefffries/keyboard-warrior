@@ -34,7 +34,7 @@ npm run dev
 | Stage gate: taught frequent keys mastered + final lesson passed | done |
 | Keyboard auto-hide, and the finger hint that makes it safe | done |
 | Weak-key injection into lesson content (PRD 13) | done |
-| Adaptive difficulty: enemy timing from recent WPM (PRD 13) | not yet |
+| Adaptive difficulty: enemy timing from demonstrated pace, timer-was-wrong easing (PRD 13) | done |
 | Stages 3-10 | later phases; `STAGE_KEYS` already knows what they teach, so content filtering is correct for a profile placed into them |
 
 ## Architecture rules
@@ -51,6 +51,7 @@ npm run dev
 - Every mastery rule reads a window, never a lifetime total. A player who was 60% on K last month and is 98% today has mastered K.
 - Nothing about mastery is announced. A decayed key quietly turns up more often; the game never says "you forgot R".
 - Saves loaded from browser storage go through the same migration and validation as an imported file. Code that reads an old blob without upgrading it gets a profile missing every field the current engine expects.
+- Enemy pacing never demands more than the player has demonstrated: the spawn interval has no upper clamp, because capping it for a slow typist would quietly reintroduce the demand the 20-40% buffer exists to remove. A lesson consistently failed at >=90% accuracy widens the buffer: the timer is wrong, not the player.
 
 ## Phase 0 exit gates (still open)
 

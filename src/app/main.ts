@@ -36,6 +36,7 @@ import {
 } from '../placement/placement';
 import { judgeLesson, lessonAt, stage, keysTaughtThrough, STAGES } from '../curriculum/stages';
 import { AdaptiveSource, planFor, practiceNote } from '../curriculum/adaptive';
+import { easingFrom, pacingFor } from '../game/pacing';
 import {
   PHASE_1A_DURATIONS,
   SpeedTestScorer,
@@ -409,10 +410,19 @@ function showMenu(): void {
 }
 
 // ---------- Lessons (PRD 11, 12, 16) ----------
+/**
+ * Accuracy at each death of the current lesson attempt streak, for the
+ * timer-was-wrong rule (PRD 13). Reset when the lesson passes or the player
+ * moves to a different lesson; deliberately NOT persisted, because "the timer
+ * was wrong today" says nothing about next week.
+ */
+let deathAccuracies: number[] = [];
+
 function startLesson(): void {
   if (!profile) return;
   const lesson = lessonAt(profile.stage, profile.lesson);
   if (!lesson) return showMenu();
+  deathAccuracies = [];
   setChrome({});
   const note = practiceNote(profile, planFor(profile, lesson));
   showScreen(`
@@ -440,11 +450,23 @@ function runLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
   hideScreen();
   setChrome({ prompt: true, hud: true, keyboard: true });
 
+  const pacing = pacingFor(profile, lesson, easingFrom(deathAccuracies));
+  // Invisible to the player by design; visible to anyone tuning the constants.
+  console.debug('[pacing]', pacing);
+
   encounter.on({
     onTokenComplete: (_token, completed) => {
       if (completed >= lesson.targetTokens) finishLesson(lesson);
     },
-    onDeath: (diagnosis) => showDeath(diagnosis),
+    onDeath: (diagnosis) => {
+      const before = easingFrom(deathAccuracies);
+      // A death with almost no typing carries no accuracy evidence -- the
+      // player walked away or froze, and 0/0 would read as 100%. Record it
+      // as streak-breaking instead of timer-indicting.
+      const p = encounter.progress;
+      deathAccuracies.push(p.presses >= 10 ? p.accuracy : 0);
+      showDeath(diagnosis, easingFrom(deathAccuracies) > before);
+    },
     onPause: (reason) => showPause(reason),
     onStruggle: (key) => {
       // Only when the scaffold is off. If the keyboard is already on screen
@@ -458,7 +480,7 @@ function runLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
   });
   // Weak keys are over-represented inside the PRD's limits; a decayed key
   // rejoins the pool here, silently.
-  encounter.start(new AdaptiveSource(lesson, planFor(profile, lesson), Date.now() & 0xffff));
+  encounter.start(new AdaptiveSource(lesson, planFor(profile, lesson), Date.now() & 0xffff), { pacing });
 }
 
 function finishLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
@@ -480,6 +502,7 @@ function finishLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
   // typing, and mastery needs the evidence more than the scoreboard does.
   absorbSamples(profile, encounter.stats.samplesIn('combat'), { sessionId: session.startedAt });
 
+  if (outcome.passed) deathAccuracies = [];
   const wasStage = profile.stage;
   let advanced = false;
   let stageCleared = false;
@@ -547,13 +570,15 @@ function gateBlock(gate: ReturnType<typeof gateStatus>): string {
 }
 
 /** PRD 16: death is a checkpoint retry with one diagnosis line, nothing more. */
-function showDeath(diagnosis: string): void {
+function showDeath(diagnosis: string, eased = false): void {
   setChrome({ prompt: true, hud: true, keyboard: true });
   showScreen(
     `<div class="sheet narrow">
       <h1>THEY REACHED YOU</h1>
       <p class="lead">${escapeHtml(diagnosis)}</p>
-      <p>Nothing was lost. Misses never kill here; only letting one close the distance does.</p>
+      ${eased
+        ? '<p>You were accurate, so that one is on the clock, not on you. They will come slower this time.</p>'
+        : '<p>Nothing was lost. Misses never kill here; only letting one close the distance does.</p>'}
       <div class="rowbtns">
         <button id="retryCheckpoint">Retry from checkpoint</button>
         <button id="deathMenu" class="ghost">Back to menu</button>
@@ -563,6 +588,13 @@ function showDeath(diagnosis: string): void {
   );
   on('retryCheckpoint', () => {
     hideScreen();
+    // Re-derive pacing so timer-was-wrong deaths take effect on the retry.
+    const lesson = profile ? lessonAt(profile.stage, profile.lesson) : null;
+    if (profile && lesson) {
+      const pacing = pacingFor(profile, lesson, easingFrom(deathAccuracies));
+      console.debug('[pacing]', pacing);
+      encounter.setPacing(pacing);
+    }
     encounter.retry();
   });
   on('deathMenu', () => {

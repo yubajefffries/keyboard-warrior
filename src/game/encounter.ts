@@ -63,6 +63,8 @@ export interface EncounterCallbacks {
 
 export interface EncounterProgress {
   correctChars: number;
+  /** Every typing press this run, hits and misses. */
+  presses: number;
   activeMs: number;
   tokensCompleted: number;
   accuracy: number;
@@ -71,6 +73,17 @@ export interface EncounterProgress {
 
 const MAX_RENDERED = 5;
 const KILL_LINE_Z = -1.6;
+/** Mean spawn depth; enemies appear at -34 to -38, so ~34 units of walk. */
+const MEAN_TRAVEL_UNITS = 36 - Math.abs(KILL_LINE_Z);
+
+/** The two dials the pacing model sets. Everything else follows from them. */
+export interface EncounterPacing {
+  spawnIntervalS: number;
+  walkTimeS: number;
+}
+
+/** Matches the old hardcoded feel, for callers that pass no pacing. */
+const DEFAULT_PACING: EncounterPacing = { spawnIntervalS: 5.5, walkTimeS: 50 };
 
 export class Encounter {
   private deps: EncounterDeps;
@@ -103,6 +116,7 @@ export class Encounter {
   private missCount = 0;
   private activeMs = 0;
   private attempts = new Map<string, { errors: number; presses: number }>();
+  private pacing: EncounterPacing = DEFAULT_PACING;
   private struggleKey: string | null = null;
   private struggleCount = 0;
   private spawnEnemies = true;
@@ -247,8 +261,9 @@ export class Encounter {
     return this.tracker;
   }
 
-  start(source: TokenSource, opts: { spawnEnemies?: boolean } = {}): void {
+  start(source: TokenSource, opts: { spawnEnemies?: boolean; pacing?: EncounterPacing } = {}): void {
     this.spawnEnemies = opts.spawnEnemies ?? true;
+    if (opts.pacing) this.pacing = opts.pacing;
     this.tracker = new StatsTracker();
     this.typing.setStats(this.tracker);
     this.clearEnemies();
@@ -292,6 +307,14 @@ export class Encounter {
     this.typing.setEnabled(true);
   }
 
+  /**
+   * Applied to enemies spawned from now on; the ones already walking keep
+   * their speed. Used by the timer-was-wrong easing between attempts.
+   */
+  setPacing(pacing: EncounterPacing): void {
+    this.pacing = pacing;
+  }
+
   /** Retry from checkpoint: same lesson, fresh enemies, keep the token stream. */
   retry(): void {
     this.clearEnemies();
@@ -313,6 +336,7 @@ export class Encounter {
   get progress(): EncounterProgress {
     return {
       correctChars: this.correctChars,
+      presses: this.correctChars + this.missCount,
       activeMs: this.activeMs,
       tokensCompleted: this.tokensCompleted,
       // Counters, not a scan: this getter runs every frame for the HUD, and
@@ -453,7 +477,10 @@ export class Encounter {
     const mesh = MeshBuilder.CreateCapsule('enemy', { height: 1.8, radius: 0.35 }, this.scene);
     mesh.position.set((Math.random() - 0.5) * 7, 0.9, -34 - Math.random() * 4);
     mesh.material = this.enemyMat;
-    this.enemies.push({ mesh, speed: 0.55 + Math.random() * 0.2, alive: true });
+    // Walk time comes from the pacing model; +/-10% so a group still shambles
+    // rather than marching.
+    const speed = (MEAN_TRAVEL_UNITS / this.pacing.walkTimeS) * (0.9 + Math.random() * 0.2);
+    this.enemies.push({ mesh, speed, alive: true });
   }
 
   private clearEnemies(): void {
@@ -505,7 +532,7 @@ export class Encounter {
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) {
         this.spawn();
-        this.spawnTimer = 4 + Math.random() * 3;
+        this.spawnTimer = this.pacing.spawnIntervalS * (0.8 + Math.random() * 0.4);
       }
       const active = this.activeEnemy();
       for (const e of this.enemies) {
