@@ -2,7 +2,7 @@
 
 Type like your life depends on it. A first-person action typing game and touch-typing tutor for one household. Desktop browser, US QWERTY, physical keyboard required. Export your save once profiles exist (Phase 1a); browser storage is volatile.
 
-**Status: Phase 0 vertical slice.** Ugly on purpose. The point of this phase is to prove the input pipeline, the prompt legibility, and that typing-to-shoot feels good with gray boxes and one real shotgun kit. See `docs/PRD_v0_4.md` for the full product spec.
+**Status: Phase 1a in progress.** Phase 0's gray-box slice proved the input pipeline and the typing-to-shoot loop; Phase 1a turns it into something a non-typist and a decent typist can both sit down with. See `docs/PRD_v0_4.md` for the full product spec.
 
 ## Run it
 
@@ -11,7 +11,7 @@ npm install
 npm run dev
 ```
 
-- `/` is the Phase 0 encounter: gray-box corridor, capsule infected, pump shotgun, home-row content. Type the prompt to fire. Wrong key is a dry-fire; backspace does nothing in combat. The next words sit to the right of the active one so you can read ahead: `F2` cycles how many (0-4).
+- `/` is the game: profile, 60-second placement, Stage 1-2 lessons in the gray-box encounter, speed test, progress screen. Type the prompt to fire. Wrong key is a dry-fire; backspace does nothing in combat. The next words sit to the right of the active one so you can read ahead: `F2` cycles how many (0-4).
 - `/harness/input-fidelity.html` is the Input Fidelity Test harness (PRD 3.1). Run it in Chrome, Edge, and Firefox and export a log per browser into `docs/input-fidelity-logs/`.
 - `/harness/legibility.html` is the Text Legibility harness (PRD 3.2): worst-case fog, motion, and flash behind the real prompt renderer with a measured WCAG contrast ratio.
 
@@ -19,18 +19,42 @@ npm run dev
 
 `npm test` runs the unit tests for the input-independent core (typing engine, stats, content). `npm run build` type-checks and bundles all three pages.
 
-## Architecture rules (Phase 0)
+## What is built
+
+| Phase 1a requirement | State |
+| --- | --- |
+| Profile create, 60s placement, routing | done |
+| Stages 1-2 lessons, pass criteria, diagnosis line | done |
+| On-screen keyboard, force on/off/auto | done |
+| Learn-mode health: only a reached player dies | done |
+| Progress screen: WPM/accuracy history, per-key heatmap, stage gates | done |
+| Export / import JSON with validation and migration | done |
+| Speed Test 30s / 60s | done |
+| Mastery engine: decay, staleness, auto-hide | aggregation and key states in; gates land in Phase 1b |
+| Stages 3-10 | later phases; `STAGE_KEYS` already knows what they teach, so content filtering is correct for a profile placed into them |
+
+## Architecture rules
 
 - `src/input/pipeline.ts` never imports the renderer. Every keystroke the game consumes flows through it as a stamped `KeyRecord` (seq, key, code, repeat, modifiers, timeStamp, frameTime).
 - The active prompt is screen-space DOM. Recoil, camera motion, and enemy lunges cannot move it.
 - Errors log once against the expected key; the pressed key feeds the confusion matrix. Corrections never erase errors.
 - Repeats never advance combat text. Modifier chords are ignored. Caps Lock and stuck Shift are surfaced, never silently rewritten.
-- Blur pauses the game; resume is an explicit click or Space.
+- Blur pauses combat and resume is explicit; blur during a timed drill discards the attempt instead, because a paused-and-resumed clock produces a WPM number that means nothing.
 - Upcoming prompts come from a `TokenQueue`, so what is drawn as "coming up" is exactly what arrives. The display can never promise a word the source then changes.
+- Browser storage is volatile and treated that way: every write is best-effort, a blocked store is surfaced rather than swallowed, and the export file is the durable copy.
+- Import validates every profile before accepting any of them. A newer format is refused with a message; a malformed file changes nothing.
+- Per-key history is capped by construction (a rolling window of intervals, not raw samples), so a long-lived family profile cannot grow without bound.
 
-## Phase 0 exit gates (all must be green before Phase 1a)
+## Phase 0 exit gates (still open)
 
-1. Input Fidelity Test passes in Chrome, Edge, Firefox (logs filed in repo)
+The PRD says Phase 1a does not begin until these are green. Phase 1a code exists
+anyway, because all four gates need a human at a real keyboard on real hardware
+and none of them can be closed by writing more code. Treat them as gates on
+letting anyone else play, not on the work continuing.
+
+1. Input Fidelity Test passes in Chrome, Edge, Firefox (logs filed in repo).
+   The robot burst now covers the app-layer half on any machine; what still
+   needs fingers is proof the OS/browser path never drops a real key.
 2. Text Legibility Test passes at 1080p on UHD-class integrated graphics
 3. Typing-to-shoot feels compelling with gray boxes and the real shotgun kit
 4. 60fps at 1080p on integrated graphics through a 100+ WPM burst

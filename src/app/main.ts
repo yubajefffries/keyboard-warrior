@@ -1,0 +1,834 @@
+/**
+ * Phase 1a app shell. PRD Sections 3.3, 10, 11, 16, 18, 21.
+ *
+ * Owns the screens and the profile; the encounter, the timed drill, and the
+ * progress view own their own behaviour. Everything here is wiring and flow:
+ * profile -> placement -> menu -> lesson or speed test -> result.
+ *
+ * One screen element whose contents are replaced, rather than a dozen hidden
+ * divs, because most screens are generated from profile data anyway and a
+ * stale hidden div is a bug waiting to be shipped.
+ */
+
+import { InputPipeline } from '../input/pipeline';
+import { WeaponAudio } from '../audio/sfx';
+import { PromptView, escapeHtml } from '../ui/prompt';
+import { KeyboardViz, resolveVisibility } from '../ui/keyboard';
+import { renderProgress } from '../ui/progress';
+import { Encounter } from '../game/encounter';
+import { TimedDrill } from '../modes/drill';
+import { absorbSamples } from '../profile/mastery';
+import {
+  ProfileStore,
+  createProfile,
+  recordActivity,
+  recordSpeedTest,
+} from '../profile/store';
+import { exportFilename, exportProfiles, importProfiles } from '../profile/transfer';
+import type { Profile, Route } from '../profile/types';
+import { MAX_PROFILES } from '../profile/types';
+import {
+  PLACEMENT_DURATION_MS,
+  PlacementScorer,
+  PlacementSource,
+  routeFor,
+  type PlacementRoute,
+} from '../placement/placement';
+import { LessonSource, judgeLesson, lessonAt, stage, keysTaughtThrough, STAGES } from '../curriculum/stages';
+import {
+  PHASE_1A_DURATIONS,
+  SpeedTestScorer,
+  WordSource,
+  wordsFor,
+} from '../modes/speedtest';
+import type { SpeedTestResult } from '../profile/types';
+
+// ---------- DOM ----------
+const $ = (id: string) => document.getElementById(id)!;
+const canvas = $('renderCanvas') as HTMLCanvasElement;
+const screenEl = $('screen');
+const hudEl = $('hud');
+const clockEl = $('clock');
+const warningsEl = $('warnings');
+const robotPanel = $('robotPanel');
+const promptRow = $('promptRow');
+
+// ---------- Core ----------
+const store = new ProfileStore();
+const pipeline = new InputPipeline();
+const audio = new WeaponAudio();
+const prompt = new PromptView({ active: $('prompt'), past: $('promptPast'), next: $('promptNext') });
+const keyboard = new KeyboardViz($('kbviz'));
+
+let profile: Profile | null = null;
+
+const lookahead = () => profile?.settings.lookahead ?? 3;
+
+const encounter = new Encounter({
+  canvas,
+  prompt,
+  hud: hudEl,
+  keyboard,
+  audio,
+  pipeline,
+  lookahead,
+});
+
+const drill = new TimedDrill({ prompt, keyboard, pipeline, audio, lookahead }, 'speed_test');
+
+pipeline.onWarnings((w) => {
+  const msgs: string[] = [];
+  if (w.capsLockOn) msgs.push('CAPS LOCK is on');
+  if (w.stuckShift) msgs.push('Shift looks stuck down');
+  warningsEl.textContent = msgs.join(' | ');
+  warningsEl.style.display = msgs.length ? 'block' : 'none';
+});
+pipeline.attach(window);
+
+// ---------- Screen plumbing ----------
+type Chrome = { prompt: boolean; hud: boolean; clock: boolean; keyboard: boolean };
+const NO_CHROME: Chrome = { prompt: false, hud: false, clock: false, keyboard: false };
+
+function setChrome(chrome: Partial<Chrome>): void {
+  const c = { ...NO_CHROME, ...chrome };
+  promptRow.style.display = c.prompt ? 'grid' : 'none';
+  hudEl.style.display = c.hud ? 'block' : 'none';
+  clockEl.style.display = c.clock ? 'block' : 'none';
+  const showKeyboard = c.keyboard && keyboardWanted();
+  keyboard.setVisible(showKeyboard);
+  // The prompt lifts to clear the keyboard; CSS owns how far.
+  document.body.classList.toggle('kb', showKeyboard);
+}
+
+/** Placement forces the keyboard on: we do not yet know who is typing. */
+let forceKeyboard = false;
+
+function keyboardWanted(): boolean {
+  if (forceKeyboard) return true;
+  if (!profile) return false;
+  return resolveVisibility(profile.settings.keyboardViz, profile.route);
+}
+
+function showScreen(html: string, opts: { dim?: boolean } = {}): void {
+  screenEl.innerHTML = html;
+  screenEl.classList.toggle('dim', opts.dim === true);
+  screenEl.classList.add('show');
+}
+
+function hideScreen(): void {
+  screenEl.classList.remove('show');
+  screenEl.innerHTML = '';
+}
+
+function on(id: string, handler: () => void): void {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('click', handler);
+}
+
+function save(): void {
+  if (profile) store.update(profile);
+}
+
+// ---------- Profiles ----------
+function showProfiles(): void {
+  setChrome({});
+  robotPanel.style.display = 'none';
+  const profiles = store.list();
+  const rows = profiles
+    .map(
+      (p) => `
+      <div class="prow">
+        <div class="who">
+          <b>${escapeHtml(p.name)}</b>
+          <span>${p.route[0].toUpperCase() + p.route.slice(1)} &middot; Stage ${p.stage} &middot;
+            ${p.sessions.length} session${p.sessions.length === 1 ? '' : 's'}</span>
+        </div>
+        <button class="small" data-play="${p.id}">Play</button>
+        <button class="small ghost" data-delete="${p.id}">Delete</button>
+      </div>`,
+    )
+    .join('');
+
+  showScreen(`
+    <div class="sheet narrow">
+      <h1 class="big">KEYBOARD WARRIOR</h1>
+      <p class="lead">Type like your life depends on it.</p>
+      ${profiles.length ? `<div class="plist">${rows}</div>` : '<p>No profiles yet on this browser.</p>'}
+      <div class="rowbtns">
+        <button id="newProfile" ${store.atCapacity ? 'disabled' : ''}>New profile</button>
+        <button id="importHere" class="ghost">Import a save file</button>
+      </div>
+      ${store.atCapacity ? `<p class="note" style="text-align:center">This browser holds the maximum of ${MAX_PROFILES} profiles.</p>` : ''}
+      ${store.persistent ? '' : '<p class="msg bad">This browser is blocking storage. You can play, but nothing will be saved unless you export.</p>'}
+      <p id="transferMsg" class="msg"></p>
+    </div>`);
+
+  for (const el of screenEl.querySelectorAll('[data-play]')) {
+    el.addEventListener('click', () => openProfile((el as HTMLElement).dataset.play!));
+  }
+  for (const el of screenEl.querySelectorAll('[data-delete]')) {
+    el.addEventListener('click', () => confirmDelete((el as HTMLElement).dataset.delete!));
+  }
+  on('newProfile', showCreate);
+  on('importHere', () => pickImportFile(() => showProfiles()));
+}
+
+function confirmDelete(id: string): void {
+  const target = store.get(id);
+  if (!target) return;
+  // PRD 21: delete needs a confirmation AND an export prompt first.
+  showScreen(`
+    <div class="sheet narrow">
+      <h1>Delete ${escapeHtml(target.name)}?</h1>
+      <p>Every session, every key, gone. There is no undo and no cloud copy.</p>
+      <div class="rowbtns">
+        <button id="exportFirst" class="ghost">Export it first</button>
+        <button id="reallyDelete">Delete permanently</button>
+      </div>
+      <div class="rowbtns"><button id="cancelDelete" class="ghost">Keep it</button></div>
+    </div>`);
+  on('exportFirst', () => downloadJSON(exportFilename([target]), exportProfiles([target])));
+  on('reallyDelete', () => {
+    store.remove(id);
+    if (profile?.id === id) profile = null;
+    showProfiles();
+  });
+  on('cancelDelete', showProfiles);
+}
+
+function showCreate(): void {
+  showScreen(`
+    <div class="sheet narrow">
+      <h1>Who is typing?</h1>
+      <p>One profile per person. Progress, stats, and settings are all per profile.</p>
+      <div class="rowbtns"><input type="text" id="profileName" maxlength="24" placeholder="Name" autocomplete="off" /></div>
+      <div class="rowbtns">
+        <button id="createProfile">Continue</button>
+        <button id="cancelCreate" class="ghost">Back</button>
+      </div>
+      <p id="createMsg" class="msg"></p>
+    </div>`);
+  const input = $('profileName') as HTMLInputElement;
+  input.focus();
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') doCreate();
+  });
+  on('createProfile', doCreate);
+  on('cancelCreate', showProfiles);
+
+  function doCreate(): void {
+    const name = input.value.trim();
+    if (!name) {
+      $('createMsg').textContent = 'A name, any name.';
+      $('createMsg').className = 'msg bad';
+      return;
+    }
+    const created = createProfile(name);
+    const result = store.add(created);
+    if (!result.ok) {
+      $('createMsg').textContent = result.error;
+      $('createMsg').className = 'msg bad';
+      return;
+    }
+    profile = created;
+    store.setActive(created.id);
+    showPlacementIntro();
+  }
+}
+
+function openProfile(id: string): void {
+  const found = store.get(id);
+  if (!found) return;
+  profile = found;
+  store.setActive(id);
+  audio.ensureStarted();
+  if (!profile.placement) showPlacementIntro();
+  else showMenu();
+}
+
+// ---------- Placement (PRD 3.3) ----------
+function showPlacementIntro(): void {
+  setChrome({});
+  showScreen(`
+    <div class="sheet narrow">
+      <h1>Before we start</h1>
+      <p class="lead">Put your left index finger on <b>F</b> and your right index finger on <b>J</b>.
+         Both keys have a raised bump. That is home row, and you should be able to find it without looking.</p>
+      <p>This is a shooting game where typing is the weapon. Every finished word fires the gun.</p>
+      <p>Sixty seconds of typing tells us where to start you. It is not a test you can fail:
+         the worst outcome is that we start at the very beginning, which is a fine place to start.</p>
+      <div class="rowbtns">
+        <button id="startPlacement">Start the 60-second check</button>
+        <button id="skipPlacement" class="ghost">Skip, start at Stage 1</button>
+      </div>
+    </div>`);
+  on('startPlacement', runPlacement);
+  on('skipPlacement', () => {
+    if (!profile) return;
+    applyRoute({ route: 'beginner', stage: 1, reason: 'You chose to start at the beginning.' }, null);
+    showMenu();
+  });
+}
+
+function runPlacement(): void {
+  if (!profile) return;
+  audio.ensureStarted();
+  hideScreen();
+  forceKeyboard = true;
+  setChrome({ prompt: true, clock: true, keyboard: true });
+
+  const source = new PlacementSource(Date.now() & 0xffff);
+  const scorer = new PlacementScorer();
+
+  drill.start(source, PLACEMENT_DURATION_MS, {
+    onPress: (_pressed, expected, correct) => scorer.record(expected, correct),
+    onToken: () => source.considerPromotion(scorer.accuracy),
+    onTick: (remaining) => setClock(remaining),
+    onFinish: (elapsed) => {
+      forceKeyboard = false;
+      const score = scorer.score(elapsed, source.reachedWords);
+      const route = routeFor(score);
+      showPlacementResult(route, score.wpm, score.accuracy, source.reachedWords);
+    },
+    onAbort: (reason) => {
+      forceKeyboard = false;
+      setChrome({});
+      showScreen(`
+        <div class="sheet narrow">
+          <h1>Let's start that again</h1>
+          <p>${escapeHtml(reason)} A timed check only means something if the clock and your hands
+             were running together, so this one is discarded.</p>
+          <div class="rowbtns"><button id="retryPlacement">Run it again</button></div>
+        </div>`);
+      on('retryPlacement', runPlacement);
+    },
+  });
+}
+
+function showPlacementResult(route: PlacementRoute, wpm: number, accuracy: number, reachedWords: boolean): void {
+  setChrome({});
+  showScreen(`
+    <div class="sheet narrow">
+      <h1>${Math.round(wpm)} WPM at ${Math.round(accuracy * 100)}%</h1>
+      <p class="lead">${escapeHtml(route.reason)}</p>
+      <div class="result-lines">
+        <div class="rl"><span>Starting point</span><b>Stage ${route.stage} &middot; ${route.route}</b></div>
+        <div class="rl"><span>On-screen keyboard</span><b>${route.route === 'beginner' ? 'on' : route.route === 'intermediate' ? 'auto' : 'off'}</b></div>
+        <div class="rl"><span>Speed Test</span><b>${route.route === 'beginner' ? 'available any time' : 'unlocked'}</b></div>
+      </div>
+      <div class="rowbtns">
+        <button id="acceptRoute">Start at Stage ${route.stage}</button>
+        ${route.stage > 1 ? '<button id="overrideRoute" class="ghost">I would rather start at Stage 1</button>' : ''}
+      </div>
+      <p class="note" style="text-align:center;margin-top:18px">
+        ${reachedWords ? '' : 'The check stayed on home-row letters, so it never saw you type words. '}
+        You can change this later; Stage 1 is never taken away.</p>
+    </div>`);
+  on('acceptRoute', () => {
+    applyRoute(route, { wpm, accuracy, reachedWords });
+    showMenu();
+  });
+  on('overrideRoute', () => {
+    applyRoute({ route: 'beginner', stage: 1, reason: route.reason }, { wpm, accuracy, reachedWords }, route.route);
+    showMenu();
+  });
+}
+
+function applyRoute(
+  route: PlacementRoute,
+  measured: { wpm: number; accuracy: number; reachedWords: boolean } | null,
+  overriddenFrom: Route | null = null,
+): void {
+  if (!profile) return;
+  profile.route = route.route;
+  profile.stage = route.stage;
+  profile.lesson = 0;
+  profile.settings.keyboardViz =
+    route.route === 'beginner' ? 'on' : route.route === 'intermediate' ? 'auto' : 'off';
+  profile.placement = {
+    at: new Date().toISOString(),
+    route: route.route,
+    wpm: measured?.wpm ?? 0,
+    accuracy: measured?.accuracy ?? 0,
+    reachedWords: measured?.reachedWords ?? false,
+    overriddenFrom,
+  };
+  save();
+}
+
+// ---------- Menu ----------
+function showMenu(): void {
+  if (!profile) return showProfiles();
+  setChrome({});
+  robotPanel.style.display = 'none';
+  const lesson = lessonAt(profile.stage, profile.lesson);
+  const stageInfo = stage(profile.stage);
+  const learnLabel = lesson
+    ? `Stage ${profile.stage} &middot; ${escapeHtml(lesson.title)}`
+    : `Stage ${profile.stage} is not built yet`;
+
+  showScreen(`
+    <div class="sheet narrow">
+      <h1>${escapeHtml(profile.name)}</h1>
+      <p class="sub">${profile.route[0].toUpperCase() + profile.route.slice(1)} &middot;
+         ${stageInfo ? escapeHtml(stageInfo.title) : 'Beyond the built curriculum'}</p>
+      <div class="menu">
+        <button id="playLearn" ${lesson ? '' : 'disabled'}>
+          Learn to type<span class="sub">${learnLabel}</span>
+        </button>
+        <button id="playSpeed" class="ghost">
+          Speed test<span class="sub">30 or 60 seconds, no enemies</span>
+        </button>
+        <button id="playProgress" class="ghost">
+          Progress<span class="sub">Every key, every session, and your export</span>
+        </button>
+        <button id="playSettings" class="ghost">
+          Settings<span class="sub">Keyboard, look-ahead, robot</span>
+        </button>
+        <button id="switchProfile" class="ghost">
+          Switch profile<span class="sub">${store.count} on this browser</span>
+        </button>
+      </div>
+      ${lesson ? '' : `<p class="note" style="text-align:center;margin-top:20px">Stages 3-10 arrive in later phases. Speed test and practice are open.</p>`}
+    </div>`);
+
+  on('playLearn', startLesson);
+  on('playSpeed', showSpeedSetup);
+  on('playProgress', showProgress);
+  on('playSettings', () => showSettings(showMenu));
+  on('switchProfile', showProfiles);
+}
+
+// ---------- Lessons (PRD 11, 12, 16) ----------
+function startLesson(): void {
+  if (!profile) return;
+  const lesson = lessonAt(profile.stage, profile.lesson);
+  if (!lesson) return showMenu();
+  setChrome({});
+  showScreen(`
+    <div class="sheet narrow">
+      <h1>${escapeHtml(lesson.title)}</h1>
+      <p class="sub">Stage ${profile.stage}, lesson ${profile.lesson + 1}</p>
+      <p class="lead">${escapeHtml(lesson.objective)}</p>
+      ${lesson.introduces.length ? `<p>New keys: <b>${lesson.introduces.map((k) => k.toUpperCase()).join('  ')}</b></p>` : ''}
+      <p>${lesson.targetTokens} sequences. Wrong key is a dry fire, and the cursor waits: fix it and carry on.
+         Backspace does nothing here.</p>
+      <div class="rowbtns">
+        <button id="beginLesson">Begin</button>
+        <button id="lessonBack" class="ghost">Back</button>
+      </div>
+      <p class="keys">Esc pause &nbsp;|&nbsp; F2 words ahead &nbsp;|&nbsp; F9 robot burst</p>
+    </div>`);
+  on('beginLesson', () => runLesson(lesson));
+  on('lessonBack', showMenu);
+}
+
+function runLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
+  if (!profile) return;
+  audio.ensureStarted();
+  hideScreen();
+  setChrome({ prompt: true, hud: true, keyboard: true });
+
+  encounter.on({
+    onTokenComplete: (_token, completed) => {
+      if (completed >= lesson.targetTokens) finishLesson(lesson);
+    },
+    onDeath: (diagnosis) => showDeath(diagnosis),
+    onPause: (reason) => showPause(reason),
+    onBurstReport: (html) => {
+      robotPanel.style.display = 'block';
+      robotPanel.innerHTML = html;
+    },
+  });
+  encounter.start(new LessonSource(lesson, Date.now() & 0xffff));
+}
+
+function finishLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
+  if (!profile) return;
+  const p = encounter.progress;
+  encounter.stop();
+  setChrome({});
+
+  const outcome = judgeLesson(profile.stage, p.accuracy, p.wpm, p.tokensCompleted, encounter.worstKey());
+
+  // Fold the samples in whatever the verdict: a failed lesson is still real
+  // typing, and mastery needs the evidence more than the scoreboard does.
+  absorbSamples(profile, encounter.stats.samplesIn('combat'));
+  recordActivity(profile, { correctChars: p.correctChars, activeMs: p.activeMs, accuracy: p.accuracy });
+
+  let advanced = false;
+  let stageCleared = false;
+  if (outcome.passed) {
+    const stageInfo = stage(profile.stage);
+    if (stageInfo && profile.lesson + 1 < stageInfo.lessons.length) {
+      profile.lesson += 1;
+      advanced = true;
+    } else {
+      if (!profile.stagesCleared.includes(profile.stage)) profile.stagesCleared.push(profile.stage);
+      stageCleared = true;
+      const next = STAGES.find((s) => s.number > profile!.stage);
+      if (next) {
+        profile.stage = next.number;
+        profile.lesson = 0;
+        advanced = true;
+      }
+    }
+  }
+  save();
+
+  showScreen(`
+    <div class="sheet narrow">
+      <h1>${escapeHtml(lesson.title)}</h1>
+      <div class="verdict-big ${outcome.passed ? 'pass' : 'fail'}">${outcome.passed ? 'PASSED' : 'NOT YET'}</div>
+      <p class="lead">${escapeHtml(outcome.diagnosis)}</p>
+      <div class="result-lines">
+        <div class="rl"><span>Accuracy</span><b>${Math.round(outcome.accuracy * 100)}%</b></div>
+        <div class="rl"><span>Speed</span><b>${Math.round(outcome.wpm)} WPM</b></div>
+        <div class="rl"><span>Sequences</span><b>${outcome.tokensCompleted}</b></div>
+      </div>
+      ${stageCleared ? '<p class="lead" style="margin-top:18px">Stage cleared. Export your progress from the Progress screen while you are thinking about it.</p>' : ''}
+      <div class="rowbtns">
+        ${outcome.passed && advanced ? '<button id="nextLesson">Next lesson</button>' : '<button id="retryLesson">Try it again</button>'}
+        <button id="resultMenu" class="ghost">Back to menu</button>
+      </div>
+    </div>`);
+  on('nextLesson', startLesson);
+  on('retryLesson', () => runLesson(lesson));
+  on('resultMenu', showMenu);
+}
+
+/** PRD 16: death is a checkpoint retry with one diagnosis line, nothing more. */
+function showDeath(diagnosis: string): void {
+  setChrome({ prompt: true, hud: true, keyboard: true });
+  showScreen(
+    `<div class="sheet narrow">
+      <h1>THEY REACHED YOU</h1>
+      <p class="lead">${escapeHtml(diagnosis)}</p>
+      <p>Nothing was lost. Misses never kill here; only letting one close the distance does.</p>
+      <div class="rowbtns">
+        <button id="retryCheckpoint">Retry from checkpoint</button>
+        <button id="deathMenu" class="ghost">Back to menu</button>
+      </div>
+    </div>`,
+    { dim: true },
+  );
+  on('retryCheckpoint', () => {
+    hideScreen();
+    encounter.retry();
+  });
+  on('deathMenu', () => {
+    encounter.stop();
+    showMenu();
+  });
+}
+
+function showPause(reason: string): void {
+  showScreen(
+    `<div class="sheet narrow">
+      <h1>PAUSED</h1>
+      <p class="lead">${escapeHtml(reason)}</p>
+      <div class="rowbtns">
+        <button id="resumeBtn">Resume</button>
+        <button id="pauseSettings" class="ghost">Settings</button>
+        <button id="quitLesson" class="ghost">Leave lesson</button>
+      </div>
+      <p class="keys">Space also resumes.</p>
+    </div>`,
+    { dim: true },
+  );
+  on('resumeBtn', doResume);
+  on('pauseSettings', () => showSettings(() => showPause(reason)));
+  on('quitLesson', () => {
+    encounter.stop();
+    showMenu();
+  });
+}
+
+function doResume(): void {
+  if (encounter.currentState !== 'paused') return;
+  audio.ensureStarted();
+  hideScreen();
+  setChrome({ prompt: true, hud: true, keyboard: true });
+  encounter.resume();
+}
+
+// ---------- Speed Test (PRD 18) ----------
+function showSpeedSetup(): void {
+  if (!profile) return;
+  setChrome({});
+  const best = profile.speedTests.reduce<SpeedTestResult | null>((a, b) => (a && a.wpm > b.wpm ? a : b), null);
+  showScreen(`
+    <div class="sheet narrow">
+      <h1>Speed test</h1>
+      <p class="lead">Common words, no enemies, no forgiveness for the clock.</p>
+      <p>Words are filtered to keys you have been taught, so this measures typing rather than surprise.</p>
+      ${best ? `<p class="sub">Your best: ${Math.round(best.wpm)} WPM at ${Math.round(best.accuracy * 100)}% over ${best.durationS}s</p>` : ''}
+      <div class="rowbtns">
+        ${PHASE_1A_DURATIONS.map((d) => `<button data-dur="${d}">${d} seconds</button>`).join('')}
+      </div>
+      <div class="rowbtns"><button id="speedBack" class="ghost">Back</button></div>
+      <p class="note" style="text-align:center;margin-top:18px">
+        Clicking away discards the attempt. A paused clock would make the number meaningless.</p>
+    </div>`);
+  for (const el of screenEl.querySelectorAll('[data-dur]')) {
+    el.addEventListener('click', () => runSpeedTest(Number((el as HTMLElement).dataset.dur) as 30 | 60));
+  }
+  on('speedBack', showMenu);
+}
+
+function runSpeedTest(durationS: 30 | 60): void {
+  if (!profile) return;
+  audio.ensureStarted();
+  hideScreen();
+  setChrome({ prompt: true, clock: true, keyboard: true });
+
+  const taught = keysTaughtThrough(profile.stage);
+  const scorer = new SpeedTestScorer();
+  const source = new WordSource(wordsFor(taught), Date.now() & 0xffff);
+
+  drill.start(source, durationS * 1000, {
+    onPress: (_pressed, expected, correct) => scorer.record(expected, correct, null),
+    onToken: (token) => scorer.completeToken(token, performance.now()),
+    onTick: (remaining) => setClock(remaining),
+    onFinish: (elapsed) => {
+      const result = scorer.result(durationS, elapsed);
+      absorbSamples(profile!, drill.stats.samplesIn('speed_test'));
+      recordSpeedTest(profile!, result);
+      save();
+      showSpeedResult(result, scorer.weakest());
+    },
+    onAbort: (reason) => {
+      setChrome({});
+      showScreen(`
+        <div class="sheet narrow">
+          <h1>Attempt discarded</h1>
+          <p class="lead">${escapeHtml(reason)}</p>
+          <p>Nothing was recorded and nothing was penalised. A timer that stopped while your hands did not
+             would produce a number that means nothing.</p>
+          <div class="rowbtns">
+            <button id="againSpeed">Run it again</button>
+            <button id="abortMenu" class="ghost">Back to menu</button>
+          </div>
+        </div>`);
+      on('againSpeed', () => runSpeedTest(durationS));
+      on('abortMenu', showMenu);
+    },
+  });
+}
+
+function showSpeedResult(result: SpeedTestResult, weak: { slowest: string[]; leastAccurate: string[] }): void {
+  setChrome({});
+  showScreen(`
+    <div class="sheet narrow">
+      <h1>${Math.round(result.wpm)} WPM</h1>
+      <p class="sub">${result.durationS} seconds &middot; ${Math.round(result.accuracy * 100)}% accuracy</p>
+      <div class="result-lines">
+        <div class="rl"><span>Raw speed, before mistakes</span><b>${Math.round(result.rawWpm)} WPM</b></div>
+        <div class="rl"><span>Correct characters</span><b>${result.correctChars}</b></div>
+        <div class="rl"><span>Wrong keys</span><b>${result.incorrectChars}</b></div>
+        <div class="rl"><span>Peak</span><b>${Math.round(result.peakWpm)} WPM</b></div>
+        <div class="rl"><span>Consistency (lower is steadier)</span><b>${result.consistency.toFixed(1)}</b></div>
+        ${weak.slowest.length ? `<div class="rl"><span>Slowest keys</span><b>${weak.slowest.map((k) => k.toUpperCase()).join(' ')}</b></div>` : ''}
+        ${weak.leastAccurate.length ? `<div class="rl"><span>Least accurate</span><b>${weak.leastAccurate.map((k) => k.toUpperCase()).join(' ')}</b></div>` : ''}
+      </div>
+      <div class="rowbtns">
+        <button id="againSpeed">Again</button>
+        <button id="speedMenu" class="ghost">Back to menu</button>
+      </div>
+    </div>`);
+  on('againSpeed', () => runSpeedTest(result.durationS as 30 | 60));
+  on('speedMenu', showMenu);
+}
+
+// ---------- Progress + transfer ----------
+function showProgress(): void {
+  if (!profile) return;
+  setChrome({});
+  showScreen(renderProgress(profile));
+  on('backToMenu', showMenu);
+  on('exportProfile', () => downloadJSON(exportFilename([profile!]), exportProfiles([profile!])));
+  on('exportAll', () => {
+    const all = store.list();
+    downloadJSON(exportFilename(all), exportProfiles(all));
+  });
+  on('importProfile', () => pickImportFile(() => showProgress()));
+}
+
+function downloadJSON(filename: string, text: string): void {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  setTransferMessage(`Saved ${filename}. Keep it somewhere your browser cannot clear.`, 'good');
+}
+
+function setTransferMessage(text: string, kind: 'good' | 'bad'): void {
+  const el = document.getElementById('transferMsg');
+  if (!el) return;
+  el.textContent = text;
+  el.className = `msg ${kind}`;
+}
+
+/**
+ * Import replaces every profile on this browser, and says so before it does.
+ * Merging two family saves key by key is a Phase 1b problem; silently picking
+ * a winner would be worse than refusing.
+ */
+function pickImportFile(after: () => void): void {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/json,.json';
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    const result = importProfiles(text);
+    if (!result.ok) {
+      setTransferMessage(`${result.error} ${result.detail ?? ''}`.trim(), 'bad');
+      return;
+    }
+    store.replaceAll(result.profiles);
+    profile = store.list()[0] ?? null;
+    if (profile) store.setActive(profile.id);
+    after();
+    setTransferMessage(
+      `Imported ${result.profiles.length} profile${result.profiles.length === 1 ? '' : 's'}` +
+        (result.migratedFrom !== null ? `, upgraded from format ${result.migratedFrom}` : '') +
+        '.',
+      'good',
+    );
+  });
+  input.click();
+}
+
+// ---------- Settings ----------
+const ROBOT_SPEEDS = [80, 100, 120, 150, 200];
+let robotSpeedIndex = 1;
+const BURST_CHARS = 200;
+
+function showSettings(back: () => void): void {
+  if (!profile) return;
+  const s = profile.settings;
+  showScreen(
+    `<div class="sheet narrow">
+      <h1>Settings</h1>
+      <p class="sub">${escapeHtml(profile.name)}</p>
+      <div class="settings">
+        <div class="row">
+          <span>On-screen keyboard<span class="keyhint">PRD 10</span></span>
+          <span class="seg">
+            ${(['auto', 'on', 'off'] as const)
+              .map((v) => `<button data-viz="${v}" class="${s.keyboardViz === v ? 'on' : ''}">${v}</button>`)
+              .join('')}
+          </span>
+        </div>
+        <div class="row">
+          <span>Words shown ahead of the one you are typing<span class="keyhint">F2</span></span>
+          <span class="seg">
+            ${[0, 1, 2, 3, 4]
+              .map((v) => `<button data-look="${v}" class="${s.lookahead === v ? 'on' : ''}">${v}</button>`)
+              .join('')}
+          </span>
+        </div>
+        <div class="row">
+          <span>Robot burst speed<span class="keyhint">F4 cycles, F9 runs</span></span>
+          <span class="seg">
+            ${ROBOT_SPEEDS.map(
+              (v, i) => `<button data-robot="${i}" class="${robotSpeedIndex === i ? 'on' : ''}">${v}</button>`,
+            ).join('')}
+          </span>
+        </div>
+      </div>
+      <p class="note" style="margin-top:16px">Auto shows the keyboard for beginners and hides it for everyone
+         else. It will follow per-key mastery once the mastery engine lands.</p>
+      <div class="rowbtns"><button id="settingsBack">Done</button></div>
+    </div>`,
+    { dim: true },
+  );
+
+  for (const el of screenEl.querySelectorAll('[data-viz]')) {
+    el.addEventListener('click', () => {
+      profile!.settings.keyboardViz = (el as HTMLElement).dataset.viz as 'auto' | 'on' | 'off';
+      save();
+      showSettings(back);
+    });
+  }
+  for (const el of screenEl.querySelectorAll('[data-look]')) {
+    el.addEventListener('click', () => {
+      profile!.settings.lookahead = Number((el as HTMLElement).dataset.look);
+      save();
+      showSettings(back);
+    });
+  }
+  for (const el of screenEl.querySelectorAll('[data-robot]')) {
+    el.addEventListener('click', () => {
+      robotSpeedIndex = Number((el as HTMLElement).dataset.robot);
+      showSettings(back);
+    });
+  }
+  on('settingsBack', back);
+}
+
+// ---------- Clock ----------
+function setClock(remainingMs: number): void {
+  const seconds = Math.ceil(remainingMs / 1000);
+  clockEl.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  clockEl.classList.toggle('low', seconds <= 10);
+}
+
+// ---------- Global keys ----------
+// F-keys only, and only the three no major browser has claimed (F1 help,
+// F3 find, F10 menu bar, F11 fullscreen, F12 devtools are all off limits).
+window.addEventListener('keydown', (e) => {
+  const target = e.target as HTMLElement | null;
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+
+  if (e.key === 'Escape' && encounter.currentState === 'running') {
+    encounter.pause('You paused.');
+    return;
+  }
+  if (e.key === ' ' && encounter.currentState === 'paused') {
+    e.preventDefault();
+    doResume();
+    return;
+  }
+  if (e.key === 'F2' && profile) {
+    e.preventDefault();
+    profile.settings.lookahead = profile.settings.lookahead >= 4 ? 0 : profile.settings.lookahead + 1;
+    save();
+  }
+  if (e.key === 'F4') {
+    e.preventDefault();
+    robotSpeedIndex = (robotSpeedIndex + 1) % ROBOT_SPEEDS.length;
+  }
+  if (e.key === 'F9') {
+    e.preventDefault();
+    if (encounter.burstRunning) encounter.stopBurst();
+    else if (!encounter.startBurst(ROBOT_SPEEDS[robotSpeedIndex], BURST_CHARS)) {
+      robotPanel.style.display = 'block';
+      robotPanel.innerHTML =
+        '<h3>ROBOT BURST</h3><div class="foot">Start a lesson first: the robot types what the game asks for.</div>';
+    }
+  }
+});
+
+// Blur pauses combat and discards timed attempts (PRD 18, 21).
+function onFocusLost(reason: string): void {
+  if (drill.isRunning) drill.abort(reason);
+  else encounter.pause(reason);
+}
+window.addEventListener('blur', () => onFocusLost('The window lost focus.'));
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) onFocusLost('The tab was hidden.');
+});
+
+// ---------- Boot ----------
+const resumed = store.active();
+if (resumed) {
+  profile = resumed;
+  if (!profile.placement) showPlacementIntro();
+  else showMenu();
+} else {
+  showProfiles();
+}

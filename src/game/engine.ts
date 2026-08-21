@@ -49,6 +49,15 @@ export class TypingEngine {
     this.context = context;
   }
 
+  /**
+   * Point the engine at a fresh tracker. Each lesson and each timed test is
+   * scored on its own samples: carrying one tracker across attempts would let
+   * a good first run hide a bad retry.
+   */
+  setStats(stats: StatsTracker): void {
+    this.stats = stats;
+  }
+
   setToken(token: string): void {
     this.token = token;
     this.index = 0;

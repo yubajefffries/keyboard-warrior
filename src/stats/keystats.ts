@@ -55,6 +55,11 @@ export class StatsTracker {
     return this.samples.length;
   }
 
+  /** Raw samples, for folding a finished run into a profile's aggregates. */
+  samplesIn(context?: StatContext): KeySample[] {
+    return context ? this.samples.filter((s) => s.context === context) : [...this.samples];
+  }
+
   totalAccuracy(context?: StatContext): number {
     const pool = context ? this.samples.filter((s) => s.context === context) : this.samples;
     if (pool.length === 0) return 1;

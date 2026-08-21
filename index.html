@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Keyboard Warrior (Phase 0)</title>
+  <title>Keyboard Warrior</title>
   <style>
     :root {
       --prompt-fg: #ffffff;
@@ -12,46 +12,37 @@
       --error: #ff5449;
       --queue-next: #cfd3d8;
       --queue-far: #9aa0a6;
+      --ink: #e6e8ea;
+      --ink-dim: #9aa0a6;
+      --ink-faint: #6c7177;
+      --panel: #17181c;
+      --line: #2a2c31;
+      --accent: #e8b04a;
+      --danger: #7a1f1a;
+      --mono: 'Consolas', 'Menlo', monospace;
+      --ui: 'Segoe UI', system-ui, sans-serif;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; color: var(--ink); }
     #renderCanvas { width: 100%; height: 100%; display: block; outline: none; }
 
-    /*
-      Prompt row: [done words] [ACTIVE] [coming up].
-      Three columns with equal 1fr sides keep the active word dead centre no
-      matter how wide the neighbours are, so the eye never has to re-find it.
-    */
+    /* ---------- Prompt row (PRD 3.2, 6) ---------- */
     #promptRow {
-      position: fixed;
-      left: 0; right: 0;
-      bottom: 18%;
-      display: grid;
-      grid-template-columns: 1fr auto 1fr;
-      align-items: center;
-      gap: 28px;
-      z-index: 10;
-      pointer-events: none;
-      font-family: 'Consolas', 'Menlo', monospace;
+      position: fixed; left: 0; right: 0; bottom: 22%;
+      transition: bottom 140ms ease-out;
+      display: grid; grid-template-columns: 1fr auto 1fr;
+      align-items: center; gap: 28px;
+      z-index: 10; pointer-events: none; font-family: var(--mono);
     }
     #promptPast, #promptNext {
-      overflow: hidden;
-      white-space: nowrap;
-      letter-spacing: 0.1em;
-      display: flex;
-      gap: 22px;
-      align-items: baseline;
+      overflow: hidden; white-space: nowrap; letter-spacing: 0.1em;
+      display: flex; gap: 22px; align-items: baseline;
     }
-    /*
-      Completed words trail off to the left. row-reverse (not direction:rtl,
-      which also flips justify-content) puts the most recent one next to the
-      active prompt and clips the oldest at the far edge.
-    */
+    /* Completed words trail left. row-reverse (not direction:rtl, which also
+       flips justify-content) keeps the most recent one beside the prompt. */
     #promptPast {
-      flex-direction: row-reverse;
-      justify-content: flex-start;
-      font-size: 26px;
-      color: #4d5157; /* dimmer than any upcoming word: the eye should pull forward */
+      flex-direction: row-reverse; justify-content: flex-start;
+      font-size: 26px; color: #4d5157;
       -webkit-mask-image: linear-gradient(to left, #000 72%, transparent 100%);
       mask-image: linear-gradient(to left, #000 72%, transparent 100%);
     }
@@ -60,100 +51,223 @@
       -webkit-mask-image: linear-gradient(to right, #000 72%, transparent 100%);
       mask-image: linear-gradient(to right, #000 72%, transparent 100%);
     }
-    /* Size and brightness fall off with distance: reading order without arrows. */
     #promptNext .q0 { font-size: 36px; color: var(--queue-next); }
     #promptNext .q1 { font-size: 30px; color: var(--queue-far); }
     #promptNext .q2 { font-size: 26px; color: #7c8188; }
     #promptNext .q3 { font-size: 24px; color: #686d73; }
 
-    /* Screen-space prompt. Recoil and camera motion never touch this layer. */
     #prompt {
-      background: var(--prompt-bg);
-      border: 1px solid #333;
-      border-radius: 10px;
-      padding: 18px 42px;
-      font-family: 'Consolas', 'Menlo', monospace;
-      font-size: 56px;
-      letter-spacing: 0.12em;
-      color: var(--prompt-fg);
-      white-space: pre;
-      user-select: none;
-      z-index: 10;
+      background: var(--prompt-bg); border: 1px solid #333; border-radius: 10px;
+      padding: 18px 42px; font-family: var(--mono); font-size: 56px;
+      letter-spacing: 0.12em; color: var(--prompt-fg); white-space: pre; user-select: none;
     }
     #prompt .done { color: var(--prompt-done); }
-    #prompt .current {
-      text-decoration: underline;
-      text-underline-offset: 8px;
-    }
-    /* Error state: weight + underline style + icon, not color alone. */
-    #prompt.error .current {
-      color: var(--error);
-      font-weight: 700;
-      text-decoration: underline wavy;
-    }
+    #prompt .current { text-decoration: underline; text-underline-offset: 8px; }
+    #prompt.error .current { color: var(--error); font-weight: 700; text-decoration: underline wavy; }
     #prompt .errIcon { display: none; font-size: 30px; vertical-align: middle; margin-left: 14px; }
     #prompt.error .errIcon { display: inline; color: var(--error); }
 
+    /*
+      The keyboard is ~230px tall, so the prompt is lifted clear of it in
+      pixels rather than percent: a percentage that clears it at 1080p still
+      collides on a short laptop screen.
+    */
+    body.kb #promptRow { bottom: 268px; }
+
+    /* ---------- On-screen keyboard (PRD 10) ---------- */
+    .kbviz {
+      position: fixed; left: 50%; bottom: 3%; transform: translateX(-50%);
+      display: none; flex-direction: column; gap: 6px; z-index: 10;
+      pointer-events: none; user-select: none;
+    }
+    .kbrow { display: flex; gap: 6px; justify-content: center; }
+    .kbkey {
+      width: 46px; height: 46px; border-radius: 7px;
+      background: rgba(22,23,27,0.9); border: 1px solid #303338;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--mono); font-size: 16px; color: #9aa0a6;
+      border-bottom: 3px solid var(--finger, #303338);
+      transition: background 90ms linear, color 90ms linear;
+    }
+    .kbkey.home { color: #d7dadd; background: rgba(30,32,38,0.92); }
+    .kbkey.bump { position: relative; }
+    .kbkey.bump::after {
+      content: ''; position: absolute; bottom: 7px; width: 14px; height: 2px;
+      border-radius: 2px; background: #6c7177;
+    }
+    .kbkey.kbspace { width: 300px; font-size: 12px; letter-spacing: 0.2em; }
+    .kbkey.next { color: #d7dadd; box-shadow: inset 0 0 0 1px #3f444b; }
+    .kbkey.target {
+      background: var(--finger, #456); color: #12141a; font-weight: 700;
+      box-shadow: 0 0 0 2px rgba(255,255,255,0.25);
+    }
+    .kbkey.hit { background: #2f5f3a; color: #eaf6ea; }
+    .kbkey.miss { background: #5f2a26; color: #ffdedb; }
+
+    /* ---------- HUD ---------- */
     #hud {
       position: fixed; top: 14px; left: 16px; z-index: 10;
-      font-family: 'Consolas', monospace; font-size: 15px; color: #cfd2d6;
-      background: rgba(10,10,12,0.6); padding: 8px 14px; border-radius: 8px;
-      line-height: 1.6;
+      font-family: var(--mono); font-size: 15px; color: #cfd2d6;
+      background: rgba(10,10,12,0.6); padding: 8px 14px; border-radius: 8px; line-height: 1.6;
     }
     #warnings {
-      position: fixed; top: 14px; right: 16px; z-index: 10; display: none;
-      font-family: 'Consolas', monospace; font-size: 15px; color: #ffb84d;
+      position: fixed; top: 14px; right: 16px; z-index: 12; display: none;
+      font-family: var(--mono); font-size: 15px; color: #ffb84d;
       background: rgba(40,25,0,0.8); padding: 8px 14px; border-radius: 8px;
     }
-    .overlay {
-      position: fixed; inset: 0; z-index: 20; display: none;
-      align-items: center; justify-content: center; flex-direction: column;
-      background: rgba(0,0,0,0.78); color: #eee; text-align: center;
-      font-family: 'Segoe UI', system-ui, sans-serif;
+    #clock {
+      position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 10;
+      display: none; font-family: var(--mono); font-size: 34px; color: var(--ink);
+      background: rgba(10,10,12,0.7); padding: 6px 22px; border-radius: 10px;
+      letter-spacing: 0.06em;
     }
-    .overlay h1 { font-size: 44px; margin-bottom: 12px; letter-spacing: 0.06em; }
-    .overlay p { font-size: 18px; color: #b9bdc2; margin-bottom: 8px; }
-    .overlay .hint { margin-top: 18px; font-size: 16px; color: #8a8f95; }
-    .overlay button {
-      margin-top: 20px; font-size: 16px; padding: 10px 26px; cursor: pointer;
-      background: #7a1f1a; color: #fff; border: 1px solid #a33; border-radius: 6px;
-    }
-    .overlay .settings {
-      margin-top: 22px; border-top: 1px solid #333; padding-top: 16px;
-      font-size: 15px; color: #b9bdc2; min-width: 460px;
-    }
-    .overlay .settings .row {
-      display: flex; justify-content: space-between; align-items: center;
-      gap: 20px; padding: 5px 0;
-    }
-    .overlay .settings .row b { color: #fff; font-family: Consolas, monospace; }
-    .overlay .settings .key {
-      font-family: Consolas, monospace; font-size: 13px; color: #8a8f95;
-      border: 1px solid #3a3d42; border-radius: 4px; padding: 1px 6px;
-    }
-    .overlay .settings .small { margin-top: 20px; font-size: 15px; }
-    .overlay .settings .small button { margin-top: 0; font-size: 14px; padding: 6px 14px; }
+    #clock.low { color: var(--accent); }
 
-    /* Robot burst report. Deliberately a HUD panel, not an overlay: the run
-       is meant to be watched, and the verdict read straight after. */
+    /* ---------- Robot burst panel ---------- */
     #robotPanel {
       position: fixed; top: 14px; right: 16px; z-index: 30; display: none;
-      width: 430px; text-align: left;
-      font-family: Consolas, Menlo, monospace; font-size: 13px; line-height: 1.5;
-      background: rgba(10,10,12,0.94); border: 1px solid #2a2c31; border-radius: 8px;
+      width: 430px; text-align: left; font-family: var(--mono); font-size: 13px; line-height: 1.5;
+      background: rgba(10,10,12,0.94); border: 1px solid var(--line); border-radius: 8px;
       padding: 12px 16px; color: #d7dadd;
     }
-    #robotPanel h3 { font-size: 14px; margin-bottom: 8px; color: #e8b04a; }
+    #robotPanel h3 { font-size: 14px; margin-bottom: 8px; color: var(--accent); }
     #robotPanel .verdict { font-size: 16px; font-weight: bold; margin-bottom: 10px; }
     #robotPanel .verdict.pass { color: #6dc26d; }
-    #robotPanel .verdict.fail { color: #ff5449; }
+    #robotPanel .verdict.fail { color: var(--error); }
     #robotPanel .line { border-top: 1px solid #26282d; padding: 6px 0; }
     #robotPanel .line .head { display: flex; justify-content: space-between; gap: 12px; }
     #robotPanel .line .head b { color: #fff; }
     #robotPanel .line .mark.ok { color: #6dc26d; }
-    #robotPanel .line .mark.bad { color: #ff5449; }
-    #robotPanel .line .detail { color: #8a8f95; font-size: 12px; margin-top: 2px; }
-    #robotPanel .foot { margin-top: 10px; color: #8a8f95; font-size: 12px; }
+    #robotPanel .line .mark.bad { color: var(--error); }
+    #robotPanel .line .detail { color: var(--ink-dim); font-size: 12px; margin-top: 2px; }
+    #robotPanel .foot { margin-top: 10px; color: var(--ink-dim); font-size: 12px; }
+
+    /* ---------- Screens ---------- */
+    #screen {
+      position: fixed; inset: 0; z-index: 20; display: none;
+      align-items: center; justify-content: center; overflow-y: auto;
+      background: rgba(0,0,0,0.86); font-family: var(--ui);
+    }
+    #screen.show { display: flex; }
+    #screen.dim { background: rgba(0,0,0,0.7); }
+    .sheet {
+      width: min(920px, 92vw); padding: 40px 0 56px; text-align: center;
+    }
+    .sheet.narrow { width: min(640px, 92vw); }
+    .sheet h1 { font-size: 40px; letter-spacing: 0.05em; margin-bottom: 8px; }
+    .sheet h1.big { font-size: 56px; }
+    .sheet h2 {
+      font-size: 15px; text-transform: uppercase; letter-spacing: 0.16em;
+      color: var(--accent); margin: 36px 0 12px; text-align: left;
+    }
+    .sheet p { color: var(--ink-dim); font-size: 17px; line-height: 1.6; margin-bottom: 10px; }
+    .sheet p.sub { color: var(--ink-faint); font-size: 15px; margin-bottom: 24px; }
+    .sheet p.lead { font-size: 20px; color: var(--ink); }
+    .sheet p.note { font-size: 14px; color: var(--ink-faint); text-align: left; }
+    .sheet p.msg { font-size: 15px; min-height: 22px; margin-top: 12px; }
+    .sheet p.msg.bad { color: var(--error); }
+    .sheet p.msg.good { color: var(--prompt-done); }
+    .sheet .keys { font-family: var(--mono); font-size: 14px; color: var(--ink-faint); margin-top: 26px; }
+
+    button {
+      font-family: var(--ui); font-size: 16px; padding: 11px 26px; cursor: pointer;
+      background: var(--danger); color: #fff; border: 1px solid #a33; border-radius: 6px;
+    }
+    button:hover { background: #8f2620; }
+    button.ghost { background: #22262c; border-color: #3a3f46; color: var(--ink); }
+    button.ghost:hover { background: #2b3037; }
+    button.small { font-size: 14px; padding: 6px 14px; }
+    button:disabled { opacity: 0.45; cursor: default; }
+    .rowbtns { display: flex; gap: 12px; justify-content: center; margin-top: 22px; flex-wrap: wrap; }
+    .rowbtns.end { margin-top: 34px; }
+    input[type=text] {
+      font-family: var(--ui); font-size: 18px; padding: 11px 14px; width: 320px;
+      background: #101114; color: var(--ink); border: 1px solid #3a3d42; border-radius: 6px;
+    }
+    input[type=text]:focus { outline: none; border-color: var(--accent); }
+
+    /* ---------- Menu / lists ---------- */
+    .menu { display: flex; flex-direction: column; gap: 10px; margin-top: 26px; }
+    .menu button { font-size: 18px; padding: 16px 22px; text-align: left; }
+    .menu button .sub { display: block; font-size: 14px; color: #d6b9b7; margin-top: 3px; }
+    .menu button.ghost .sub { color: var(--ink-dim); }
+    .plist { display: flex; flex-direction: column; gap: 8px; margin: 22px 0; }
+    .prow {
+      display: flex; align-items: center; gap: 14px; text-align: left;
+      background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px;
+    }
+    .prow .who { flex: 1; }
+    .prow .who b { font-size: 19px; }
+    .prow .who span { display: block; font-size: 14px; color: var(--ink-faint); margin-top: 2px; }
+
+    /* ---------- Cards / charts / heatmap ---------- */
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 8px; }
+    .card {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+      padding: 16px; text-align: left;
+    }
+    .card .label { font-size: 13px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.1em; }
+    .card b { display: block; font-size: 30px; margin: 6px 0 4px; font-family: var(--mono); }
+    .card .detail { font-size: 13px; color: var(--ink-dim); }
+    .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .charts figure { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+    .charts figcaption { font-size: 13px; color: var(--ink-dim); margin-top: 6px; text-align: left; }
+
+    .heat { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+    .heatrow { display: flex; gap: 6px; }
+    .heatkey {
+      width: 52px; height: 46px; border-radius: 7px; display: flex;
+      align-items: center; justify-content: center; font-family: var(--mono); font-size: 16px;
+      background: #16181c; border: 1px solid #26282d; color: #55585e;
+    }
+    .heatkey.introduced { background: #2a2620; border-color: #4a412f; color: #c8b183; }
+    .heatkey.practiced  { background: #2b2a1c; border-color: #55512c; color: #ddd08a; }
+    .heatkey.mastered   { background: #1e3324; border-color: #33633f; color: #8fdca2; }
+    .heatkey.decayed    { background: #341f1d; border-color: #6b322c; color: #e79c92; }
+    .heatkey.unverified { background: #24303a; border-color: #3c5766; color: #9cc4dc; }
+    .legend { display: flex; gap: 18px; justify-content: center; font-size: 13px; color: var(--ink-dim); margin-top: 14px; }
+    .legend .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+    .legend .sw.mastered { background: #33633f; }
+    .legend .sw.practiced { background: #55512c; }
+    .legend .sw.introduced { background: #4a412f; }
+    .legend .sw.decayed { background: #6b322c; }
+    .legend .sw.unseen { background: #26282d; }
+
+    .stages { list-style: none; text-align: left; }
+    .stages li { padding: 9px 4px; border-bottom: 1px solid #202226; color: var(--ink-dim); font-size: 16px; }
+    .stages li.cleared { color: #8fdca2; }
+    .stages li.current { color: var(--ink); }
+    .stages li.locked { color: var(--ink-faint); font-style: italic; }
+    .stages .mark { display: inline-block; width: 20px; font-family: var(--mono); }
+    .stages .detail { float: right; font-size: 13px; color: var(--ink-faint); }
+
+    /* ---------- Settings rows ---------- */
+    .settings { margin-top: 8px; text-align: left; }
+    .settings .row {
+      display: flex; justify-content: space-between; align-items: center; gap: 20px;
+      padding: 12px 4px; border-bottom: 1px solid #202226; font-size: 16px; color: var(--ink-dim);
+    }
+    .settings .row b { color: var(--ink); font-family: var(--mono); }
+    .settings .row .keyhint {
+      font-family: var(--mono); font-size: 12px; color: var(--ink-faint);
+      border: 1px solid #3a3d42; border-radius: 4px; padding: 1px 6px; margin-left: 8px;
+    }
+    .seg { display: inline-flex; border: 1px solid #3a3f46; border-radius: 6px; overflow: hidden; }
+    .seg button {
+      background: #1b1e23; border: none; border-radius: 0; font-size: 14px; padding: 7px 16px;
+      color: var(--ink-dim);
+    }
+    .seg button.on { background: var(--accent); color: #17181c; font-weight: 600; }
+
+    .result-lines { text-align: left; margin-top: 10px; }
+    .result-lines .rl {
+      display: flex; justify-content: space-between; gap: 16px;
+      padding: 10px 4px; border-bottom: 1px solid #202226; font-size: 16px; color: var(--ink-dim);
+    }
+    .result-lines .rl b { color: var(--ink); font-family: var(--mono); }
+    .verdict-big { font-size: 22px; font-weight: 700; margin: 6px 0 4px; }
+    .verdict-big.pass { color: var(--prompt-done); }
+    .verdict-big.fail { color: var(--accent); }
   </style>
 </head>
 <body>
@@ -165,57 +279,14 @@
     <div id="promptNext" aria-hidden="true"></div>
   </div>
 
+  <div id="kbviz" class="kbviz"></div>
   <div id="hud"></div>
+  <div id="clock"></div>
   <div id="warnings"></div>
   <div id="robotPanel"></div>
 
-  <div class="overlay" id="startOverlay" style="display:flex">
-    <h1>KEYBOARD WARRIOR</h1>
-    <p>Type like your life depends on it.</p>
-    <p>Phase 0 vertical slice: gray-box, home row, pump shotgun.</p>
-    <p>Type the prompt to fire. Wrong key = dry fire. Backspace does nothing.</p>
-    <p>The next words are queued to the right of the one you are typing: read ahead.</p>
-    <button id="startBtn">Click to start</button>
-    <p class="hint">Audio starts on click (browser policy). US QWERTY, physical keyboard.</p>
-    <p class="hint">F2 words ahead &nbsp;|&nbsp; F4 robot speed &nbsp;|&nbsp; F9 robot burst &nbsp;|&nbsp; Esc pause</p>
-  </div>
+  <div id="screen"></div>
 
-  <div class="overlay" id="pauseOverlay">
-    <h1>PAUSED</h1>
-    <p id="pauseReason">Window lost focus.</p>
-    <button id="resumeBtn">Resume (or press Space)</button>
-
-    <div class="settings">
-      <div class="row">
-        <span>Words shown ahead of the one you are typing</span>
-        <span>
-          <button id="lookaheadDown" style="margin:0;padding:2px 10px;background:#26323f;border-color:#456;">&minus;</button>
-          <b id="lookaheadValue" style="display:inline-block;min-width:22px;text-align:center;">3</b>
-          <button id="lookaheadUp" style="margin:0;padding:2px 10px;background:#26323f;border-color:#456;">+</button>
-          <span class="key">F2</span>
-        </span>
-      </div>
-      <div class="row">
-        <span>Robot burst speed (types for you, to test the game at speed)</span>
-        <span><b id="robotWpmValue">100</b> wpm <span class="key">F4</span></span>
-      </div>
-      <div class="row">
-        <span>Run a 200-key burst at that speed</span>
-        <span><span class="key">F9</span> starts / stops</span>
-      </div>
-      <div class="row small">
-        <button id="exportBtn" style="background:#26323f;border-color:#456;">Export stats JSON</button>
-        <button id="exportBurstBtn" style="background:#26323f;border-color:#456;">Export last burst JSON</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="overlay" id="deathOverlay">
-    <h1>THEY REACHED YOU</h1>
-    <p id="diagnosis"></p>
-    <button id="retryBtn">Retry from checkpoint</button>
-  </div>
-
-  <script type="module" src="/src/game/main.ts"></script>
+  <script type="module" src="/src/app/main.ts"></script>
 </body>
 </html>
