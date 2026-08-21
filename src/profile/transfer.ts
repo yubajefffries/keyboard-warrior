@@ -31,6 +31,23 @@ const KEY_STATES: KeyState[] = [
   'unseen', 'introduced', 'practiced', 'mastered', 'decayed', 'unverified',
 ];
 
+/**
+ * Ids end up interpolated into DOM attributes, so they are constrained here,
+ * at the boundary, rather than escaped at every render site. An id that fails
+ * the pattern is regenerated: identity within one browser is all it carries.
+ */
+const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const DURATIONS = new Set([15, 30, 60, 120, 300]);
+
+function num(v: unknown, fallback = 0): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+}
+
+/** Local, not imported from store.ts: store already imports this module. */
+function newSafeId(): string {
+  return `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 const APP_TAG = 'keyboard-warrior';
 
 export interface ExportPayload {
@@ -234,10 +251,11 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 export function validateProfile(input: unknown): ProfileResult {
   if (!isPlainObject(input)) return { ok: false, error: 'It is not an object.' };
 
-  const id = input.id;
+  const rawId = input.id;
   const name = input.name;
-  if (typeof id !== 'string' || id === '') return { ok: false, error: 'It has no id.' };
+  if (typeof rawId !== 'string' || rawId === '') return { ok: false, error: 'It has no id.' };
   if (typeof name !== 'string' || name.trim() === '') return { ok: false, error: 'It has no name.' };
+  const id = SAFE_ID.test(rawId) ? rawId : newSafeId();
 
   const route = ROUTES.includes(input.route as Route) ? (input.route as Route) : null;
   if (route === null) return { ok: false, error: `Unknown route ${JSON.stringify(input.route)}.` };
@@ -259,7 +277,7 @@ export function validateProfile(input: unknown): ProfileResult {
   const now = new Date().toISOString();
   const profile: Profile = {
     id,
-    name: name.trim(),
+    name: name.trim().slice(0, 40),
     createdAt: typeof input.createdAt === 'string' ? input.createdAt : now,
     lastPlayedAt: typeof input.lastPlayedAt === 'string' ? input.lastPlayedAt : now,
     route,
@@ -271,9 +289,47 @@ export function validateProfile(input: unknown): ProfileResult {
     settings: mergeSettings(input.settings, route),
     keys: keys.value,
     keyStates: validateKeyStates(input.keyStates),
-    sessions: input.sessions as Profile['sessions'],
-    speedTests: input.speedTests as Profile['speedTests'],
-    placement: isPlainObject(input.placement) ? (input.placement as unknown as Profile['placement']) : null,
+    // History rows are rebuilt field by field: they feed straight into HTML
+    // on the progress screen, and a cast would carry whatever a hand-edited
+    // file put there. A row that is not numbers is dropped, not repaired --
+    // fabricating a session would corrupt every per-session metric.
+    sessions: input.sessions
+      .filter(isPlainObject)
+      .filter((r) => typeof r.correctChars === 'number' && typeof r.activeMs === 'number')
+      .map((r) => ({
+        startedAt: typeof r.startedAt === 'string' ? r.startedAt : '',
+        endedAt: typeof r.endedAt === 'string' ? r.endedAt : '',
+        correctChars: Math.max(0, num(r.correctChars)),
+        activeMs: Math.max(0, num(r.activeMs)),
+        accuracy: Math.min(1, Math.max(0, num(r.accuracy, 1))),
+        wpm: Math.max(0, num(r.wpm)),
+      })),
+    speedTests: input.speedTests
+      .filter(isPlainObject)
+      .filter((r) => DURATIONS.has(r.durationS as number))
+      .map((r) => ({
+        at: typeof r.at === 'string' ? r.at : '',
+        durationS: r.durationS as Profile['speedTests'][number]['durationS'],
+        wpm: Math.max(0, num(r.wpm)),
+        rawWpm: Math.max(0, num(r.rawWpm)),
+        accuracy: Math.min(1, Math.max(0, num(r.accuracy, 1))),
+        correctChars: Math.max(0, num(r.correctChars)),
+        incorrectChars: Math.max(0, num(r.incorrectChars)),
+        consistency: Math.max(0, num(r.consistency)),
+        peakWpm: Math.max(0, num(r.peakWpm)),
+      })),
+    placement: isPlainObject(input.placement)
+      ? {
+          at: typeof input.placement.at === 'string' ? input.placement.at : '',
+          route: ROUTES.includes(input.placement.route as Route) ? (input.placement.route as Route) : route,
+          wpm: Math.max(0, num(input.placement.wpm)),
+          accuracy: Math.min(1, Math.max(0, num(input.placement.accuracy))),
+          reachedWords: input.placement.reachedWords === true,
+          overriddenFrom: ROUTES.includes(input.placement.overriddenFrom as Route)
+            ? (input.placement.overriddenFrom as Route)
+            : null,
+        }
+      : null,
   };
   return { ok: true, profile };
 }

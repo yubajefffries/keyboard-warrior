@@ -13,8 +13,8 @@
 
 import { FINGER_LABEL, FINGER_OF } from '../profile/mastery';
 
-/** US QWERTY, the only layout the PRD supports. */
-const ROWS: string[][] = [
+/** US QWERTY, the only layout the PRD supports. Progress heatmap uses it too. */
+export const KEYBOARD_ROWS: string[][] = [
   ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
   ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';'],
   ['z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/'],
@@ -32,8 +32,6 @@ const FINGER_COLORS: Record<string, string> = {
   thumb: '#7f858c',
 };
 
-export type FingerGuideMode = 'highlight' | 'off';
-
 export class KeyboardViz {
   private root: HTMLElement;
   private cells = new Map<string, HTMLElement>();
@@ -49,7 +47,7 @@ export class KeyboardViz {
   private build(): void {
     this.root.innerHTML = '';
     this.root.classList.add('kbviz');
-    for (const row of ROWS) {
+    for (const row of KEYBOARD_ROWS) {
       const rowEl = document.createElement('div');
       rowEl.className = 'kbrow';
       for (const key of row) {

@@ -100,6 +100,7 @@ export class Encounter {
   private completed: string[] = [];
   private tokensCompleted = 0;
   private correctChars = 0;
+  private missCount = 0;
   private activeMs = 0;
   private attempts = new Map<string, { errors: number; presses: number }>();
   private struggleKey: string | null = null;
@@ -196,6 +197,7 @@ export class Encounter {
       },
       onMiss: (expected, pressed) => {
         deps.audio.dryFire();
+        this.missCount += 1;
         this.bump(expected, false);
         this.deps.prompt.flashError(performance.now());
         this.deps.keyboard?.flash(pressed, 'miss');
@@ -255,6 +257,7 @@ export class Encounter {
     this.attempts = new Map();
     this.tokensCompleted = 0;
     this.correctChars = 0;
+    this.missCount = 0;
     this.activeMs = 0;
     this.spawnTimer = 0;
     this.resetStruggle();
@@ -312,7 +315,13 @@ export class Encounter {
       correctChars: this.correctChars,
       activeMs: this.activeMs,
       tokensCompleted: this.tokensCompleted,
-      accuracy: this.tracker.totalAccuracy('combat'),
+      // Counters, not a scan: this getter runs every frame for the HUD, and
+      // filtering the sample array grows linearly through a lesson -- in the
+      // exact path the burst test measures.
+      accuracy:
+        this.correctChars + this.missCount === 0
+          ? 1
+          : this.correctChars / (this.correctChars + this.missCount),
       wpm: this.activeMs > 0 ? this.correctChars / 5 / (this.activeMs / 60_000) : 0,
     };
   }

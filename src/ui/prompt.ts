@@ -21,6 +21,7 @@ export interface PromptElements {
 export class PromptView {
   private el: PromptElements;
   private errorUntil = 0;
+  private errorShown = false;
 
   constructor(el: PromptElements) {
     this.el = el;
@@ -56,12 +57,17 @@ export class PromptView {
   /** Error state is weight + underline style + icon, never color alone. */
   flashError(now: number, durationMs = 220): void {
     this.errorUntil = now + durationMs;
+    this.errorShown = true;
     this.el.active.classList.add('error');
   }
 
-  /** Called from the frame loop; cheap no-op once the class is already off. */
+  /** Called from the frame loop. The flag keeps it a pure JS compare on the
+   *  frames (almost all of them) where there is no error class to clear. */
   tick(now: number): void {
-    if (now > this.errorUntil) this.el.active.classList.remove('error');
+    if (this.errorShown && now > this.errorUntil) {
+      this.errorShown = false;
+      this.el.active.classList.remove('error');
+    }
   }
 
   clear(): void {
@@ -71,6 +77,16 @@ export class PromptView {
   }
 }
 
+/**
+ * Escapes for BOTH element and attribute context: several call sites put the
+ * result inside title="..." and data-* attributes, where an unescaped quote
+ * is as much an exit as an angle bracket is in text.
+ */
 export function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }

@@ -17,7 +17,7 @@ export interface TokenSource {
 }
 
 export { mulberry32 } from '../util/rand';
-import { mulberry32 } from '../util/rand';
+import { mulberry32, pickFresh } from '../util/rand';
 
 export class HomeRowSource implements TokenSource {
   private rand: () => number;
@@ -29,16 +29,8 @@ export class HomeRowSource implements TokenSource {
 
   next(): string {
     // 40% drills, 60% words; never repeat any of the last 3 tokens.
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const pool = this.rand() < 0.4 ? DRILLS : HOME_ROW_WORDS;
-      const token = pool[Math.floor(this.rand() * pool.length)];
-      if (!this.recent.includes(token)) {
-        this.recent.push(token);
-        if (this.recent.length > 3) this.recent.shift();
-        return token;
-      }
-    }
-    return HOME_ROW_WORDS[Math.floor(this.rand() * HOME_ROW_WORDS.length)];
+    const pool = this.rand() < 0.4 ? DRILLS : HOME_ROW_WORDS;
+    return pickFresh(this.rand, pool, this.recent);
   }
 }
 
@@ -98,7 +90,3 @@ export class TokenQueue {
 
 /** Every character the Phase 0 source can emit (for validation/tests). */
 export const TAUGHT_KEYS = new Set(['a', 's', 'd', 'f', 'j', 'k', 'l', ';']);
-
-export function allPhase0Tokens(): string[] {
-  return [...DRILLS, ...HOME_ROW_WORDS];
-}

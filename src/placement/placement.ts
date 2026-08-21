@@ -12,7 +12,7 @@
  * route is always overridable and Stage 1 is never taken away.
  */
 
-import { mulberry32 } from '../util/rand';
+import { mulberry32, pickFresh } from '../util/rand';
 import type { TokenSource } from '../content/sequences';
 import type { Route } from '../profile/types';
 
@@ -93,18 +93,8 @@ export class PlacementSource implements TokenSource {
   }
 
   next(): string {
-    const pool = this.promoted ? WORDS : LETTERS;
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const token = pool[Math.floor(this.rand() * pool.length)];
-      if (!this.recent.includes(token)) {
-        this.recent.push(token);
-        if (this.recent.length > 3) this.recent.shift();
-        this.tokensServed += 1;
-        return token;
-      }
-    }
     this.tokensServed += 1;
-    return pool[0];
+    return pickFresh(this.rand, this.promoted ? WORDS : LETTERS, this.recent);
   }
 }
 

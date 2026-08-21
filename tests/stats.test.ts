@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { StatsTracker } from '../src/stats/keystats';
-import { HomeRowSource, TAUGHT_KEYS, allPhase0Tokens } from '../src/content/sequences';
+import { HomeRowSource, TAUGHT_KEYS } from '../src/content/sequences';
 
 describe('StatsTracker', () => {
   it('computes standard WPM: (chars/5)/minutes', () => {
@@ -38,7 +38,8 @@ describe('StatsTracker', () => {
 
 describe('Phase 0 content', () => {
   it('every token uses only taught home-row keys', () => {
-    for (const token of allPhase0Tokens()) {
+    const source = new HomeRowSource(11);
+    for (const token of Array.from({ length: 100 }, () => source.next())) {
       for (const ch of token) expect(TAUGHT_KEYS.has(ch), `char ${ch} in ${token}`).toBe(true);
     }
   });

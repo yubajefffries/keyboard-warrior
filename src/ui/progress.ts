@@ -14,12 +14,7 @@ import { gateStatus, keyReport, type KeyReport } from '../profile/mastery';
 import { MASTERY_MIN_SAMPLES, MASTERY_RECENT_DAYS, type Profile, type KeyState } from '../profile/types';
 import { STAGES, keysTaughtThrough } from '../curriculum/stages';
 import { escapeHtml } from './prompt';
-
-const ROWS: string[][] = [
-  ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
-  ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';'],
-  ['z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/'],
-];
+import { KEYBOARD_ROWS } from './keyboard';
 
 const STATE_LABEL: Record<KeyState, string> = {
   unseen: 'not taught yet',
@@ -135,7 +130,7 @@ function spark(values: number[], color: string, forceMin?: number, forceMax?: nu
 }
 
 function heatmap(report: Map<string, KeyReport>): string {
-  return `<div class="heat">${ROWS.map(
+  return `<div class="heat">${KEYBOARD_ROWS.map(
     (row) =>
       `<div class="heatrow">${row
         .map((key) => {
@@ -157,6 +152,13 @@ function heatmap(report: Map<string, KeyReport>): string {
  * its taught frequent keys being mastered, and "I passed every lesson and
  * nothing happened" is the most confusing thing this game could do silently.
  */
+/** One line per unmastered key: what would move it. Shared with the lesson result screen. */
+export function describeBlocker(b: { key: string; accuracy: number; presses: number; needed: number }): string {
+  return b.needed > 0
+    ? `${b.needed} more press${b.needed === 1 ? '' : 'es'} before it can be judged`
+    : `${Math.round(b.accuracy * 100)}% over its last ${b.presses}`;
+}
+
 function gateSummary(profile: Profile): string {
   const gate = gateStatus(profile, keysTaughtThrough(profile.stage));
   if (gate.ready) {
@@ -164,13 +166,7 @@ function gateSummary(profile: Profile): string {
   }
   const rows = gate.blocking
     .slice(0, 6)
-    .map((b) => {
-      const why =
-        b.needed > 0
-          ? `${b.needed} more press${b.needed === 1 ? '' : 'es'} to judge`
-          : `${Math.round(b.accuracy * 100)}% of its last ${b.presses}`;
-      return `<div class="rl"><span>${b.key.toUpperCase()} &mdash; ${STATE_LABEL[b.state]}</span><b>${why}</b></div>`;
-    })
+    .map((b) => `<div class="rl"><span>${b.key.toUpperCase()} &mdash; ${STATE_LABEL[b.state]}</span><b>${describeBlocker(b)}</b></div>`)
     .join('');
   return `
     <div class="result-lines">${rows}</div>

@@ -11,7 +11,7 @@
  * type already so adding them later is a menu change, not a rewrite.
  */
 
-import { mulberry32 } from '../util/rand';
+import { mulberry32, pickFresh } from '../util/rand';
 import type { TokenSource } from '../content/sequences';
 import type { SpeedTestResult } from '../profile/types';
 
@@ -57,15 +57,7 @@ export class WordSource implements TokenSource {
   }
 
   next(): string {
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const token = this.pool[Math.floor(this.rand() * this.pool.length)];
-      if (!this.recent.includes(token)) {
-        this.recent.push(token);
-        if (this.recent.length > 3) this.recent.shift();
-        return token;
-      }
-    }
-    return this.pool[Math.floor(this.rand() * this.pool.length)];
+    return pickFresh(this.rand, this.pool, this.recent);
   }
 }
 

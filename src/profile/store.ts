@@ -200,10 +200,6 @@ export class ProfileStore {
     const state: StoredState = { schemaVersion: PROFILE_SCHEMA_VERSION, profiles: this.profiles };
     return writeRaw(JSON.stringify(state));
   }
-
-  snapshot(): StoredState {
-    return { schemaVersion: PROFILE_SCHEMA_VERSION, profiles: this.profiles };
-  }
 }
 
 /** Enforce the history caps from PRD 21 before anything is written. */

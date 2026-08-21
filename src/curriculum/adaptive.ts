@@ -14,7 +14,7 @@
  * how people stop playing.
  */
 
-import { mulberry32 } from '../util/rand';
+import { mulberry32, pickFresh } from '../util/rand';
 import type { TokenSource } from '../content/sequences';
 import { lowExposureKeys, weakKeys, keyState } from '../profile/mastery';
 import type { Profile } from '../profile/types';
@@ -101,7 +101,7 @@ export class AdaptiveSource implements TokenSource {
   }
 
   next(): string {
-    const token = this.choose();
+    const token = pickFresh(this.rand, this.choose(), this.recent);
     this.served += 1;
     const candidate = this.candidates.find((c) => c.token === token);
     if (candidate?.hitsWeak && !this.plan.passthrough) {
@@ -111,12 +111,12 @@ export class AdaptiveSource implements TokenSource {
       this.consecutiveWeak = 0;
     }
     if (candidate?.hitsLowExposure) this.lowServed += 1;
-    this.remember(token);
     return token;
   }
 
-  private choose(): string {
-    if (this.plan.passthrough) return this.pick(this.candidates);
+  /** Which slice of the pool this slot should draw from. */
+  private choose(): string[] {
+    if (this.plan.passthrough) return tokens(this.candidates);
 
     // Low-exposure floor comes first: these keys cannot earn their own
     // evaluation without appearing, so their share is a floor, not a target.
@@ -125,7 +125,7 @@ export class AdaptiveSource implements TokenSource {
       this.lowServed < (this.served + 1) * LOW_EXPOSURE_FLOOR_RATE
     ) {
       const wanted = this.candidates.filter((c) => c.hitsLowExposure);
-      if (wanted.length) return this.pick(wanted);
+      if (wanted.length) return tokens(wanted);
     }
 
     const weakShare = this.served === 0 ? 0 : this.weakServed / this.served;
@@ -139,26 +139,19 @@ export class AdaptiveSource implements TokenSource {
       // Prefer a weak token that also carries a key the player owns, so the
       // sequence still completes and the gun still fires.
       const anchored = this.candidates.filter((c) => c.hitsWeak && c.hasAnchor);
-      if (anchored.length) return this.pick(anchored);
+      if (anchored.length) return tokens(anchored);
       const any = this.candidates.filter((c) => c.hitsWeak);
-      if (any.length) return this.pick(any);
+      if (any.length) return tokens(any);
     }
 
     // Otherwise something the player can land cleanly.
     const easy = this.candidates.filter((c) => !c.hitsWeak);
-    return this.pick(easy.length ? easy : this.candidates);
+    return tokens(easy.length ? easy : this.candidates);
   }
+}
 
-  private pick(from: Candidate[]): string {
-    const fresh = from.filter((c) => !this.recent.includes(c.token));
-    const options = fresh.length ? fresh : from;
-    return options[Math.floor(this.rand() * options.length)].token;
-  }
-
-  private remember(token: string): void {
-    this.recent.push(token);
-    if (this.recent.length > 3) this.recent.shift();
-  }
+function tokens(candidates: Candidate[]): string[] {
+  return candidates.map((c) => c.token);
 }
 
 /**

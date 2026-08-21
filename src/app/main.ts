@@ -14,7 +14,7 @@ import { InputPipeline } from '../input/pipeline';
 import { WeaponAudio } from '../audio/sfx';
 import { PromptView, escapeHtml } from '../ui/prompt';
 import { FingerHint, KeyboardViz, resolveVisibility } from '../ui/keyboard';
-import { renderProgress } from '../ui/progress';
+import { describeBlocker, renderProgress } from '../ui/progress';
 import { Encounter } from '../game/encounter';
 import { TimedDrill } from '../modes/drill';
 import { absorbSamples, autoKeyboardVisible, gateStatus } from '../profile/mastery';
@@ -414,13 +414,14 @@ function startLesson(): void {
   const lesson = lessonAt(profile.stage, profile.lesson);
   if (!lesson) return showMenu();
   setChrome({});
+  const note = practiceNote(profile, planFor(profile, lesson));
   showScreen(`
     <div class="sheet narrow">
       <h1>${escapeHtml(lesson.title)}</h1>
       <p class="sub">Stage ${profile.stage}, lesson ${profile.lesson + 1}</p>
       <p class="lead">${escapeHtml(lesson.objective)}</p>
       ${lesson.introduces.length ? `<p>New keys: <b>${lesson.introduces.map((k) => k.toUpperCase()).join('  ')}</b></p>` : ''}
-      ${practiceNote(profile, planFor(profile, lesson)) ? `<p>${escapeHtml(practiceNote(profile, planFor(profile, lesson))!)}</p>` : ''}
+      ${note ? `<p>${escapeHtml(note)}</p>` : ''}
       <p>${lesson.targetTokens} sequences. Wrong key is a dry fire, and the cursor waits: fix it and carry on.
          Backspace does nothing here.</p>
       <div class="rowbtns">
@@ -537,13 +538,7 @@ function finishLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
 function gateBlock(gate: ReturnType<typeof gateStatus>): string {
   const rows = gate.blocking
     .slice(0, 4)
-    .map((b) => {
-      const why =
-        b.needed > 0
-          ? `${b.needed} more press${b.needed === 1 ? '' : 'es'} before it can be judged`
-          : `${Math.round(b.accuracy * 100)}% over its last ${b.presses}`;
-      return `<div class="rl"><span>${b.key.toUpperCase()}</span><b>${why}</b></div>`;
-    })
+    .map((b) => `<div class="rl"><span>${b.key.toUpperCase()}</span><b>${describeBlocker(b)}</b></div>`)
     .join('');
   return `
     <p class="lead" style="margin-top:18px">Lesson passed. The stage stays open until these keys are solid.</p>
@@ -741,6 +736,13 @@ function pickImportFile(after: () => void): void {
   input.addEventListener('change', async () => {
     const file = input.files?.[0];
     if (!file) return;
+    // A real export for a full household is well under 1 MB. Refuse before
+    // reading: parsing a gigabyte of "JSON" hangs the tab long before
+    // validation gets a say.
+    if (file.size > 10_000_000) {
+      setTransferMessage('That file is far too large to be a Keyboard Warrior export. Nothing was changed.', 'bad');
+      return;
+    }
     const text = await file.text();
     const result = importProfiles(text);
     if (!result.ok) {

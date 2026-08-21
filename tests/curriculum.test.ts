@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { STAGES, LessonSource, judgeLesson, keysTaughtThrough, validateStages } from '../src/curriculum/stages';
+import { STAGES, judgeLesson, keysTaughtThrough, validateStages } from '../src/curriculum/stages';
 import { LESSON_MIN_ACCURACY } from '../src/profile/types';
 
 describe('curriculum content (PRD 11)', () => {
@@ -30,16 +30,6 @@ describe('curriculum content (PRD 11)', () => {
     }
   });
 
-  it('serves tokens without repeating the last three', () => {
-    const source = new LessonSource(STAGES[1].lessons[2], 42);
-    const window: string[] = [];
-    for (let i = 0; i < 200; i++) {
-      const token = source.next();
-      expect(window).not.toContain(token);
-      window.push(token);
-      if (window.length > 3) window.shift();
-    }
-  });
 });
 
 describe('lesson pass criteria (PRD 12)', () => {

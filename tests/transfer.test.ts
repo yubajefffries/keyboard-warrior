@@ -261,3 +261,84 @@ describe('loading from storage', () => {
     }
   });
 });
+
+/**
+ * The import file is the one untrusted input this game accepts, and pieces of
+ * it are interpolated into HTML. These pin the boundary: nothing that could
+ * carry markup or break an attribute survives validation.
+ */
+describe('hostile save files', () => {
+  it('regenerates an id that could break out of a DOM attribute', () => {
+    const result = roundTrip((p) => {
+      (p.profiles as Record<string, unknown>[])[0].id = '"><img src=x onerror=alert(1)>';
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.profiles[0].id).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
+  });
+
+  it('keeps a legitimate id unchanged', () => {
+    const original = createProfile('Jeff');
+    const result = importProfiles(exportProfiles([original]));
+    if (result.ok) expect(result.profiles[0].id).toBe(original.id);
+  });
+
+  it('drops a speed test whose duration is markup instead of a number', () => {
+    const result = roundTrip((p) => {
+      (p.profiles as Record<string, unknown>[])[0].speedTests = [
+        { at: 'x', durationS: '<script>alert(1)</script>', wpm: 50, rawWpm: 50, accuracy: 1, correctChars: 1, incorrectChars: 0, consistency: 0, peakWpm: 50 },
+        { at: 'x', durationS: 30, wpm: 50, rawWpm: 50, accuracy: 1, correctChars: 125, incorrectChars: 0, consistency: 0, peakWpm: 50 },
+      ];
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.profiles[0].speedTests).toHaveLength(1);
+      expect(result.profiles[0].speedTests[0].durationS).toBe(30);
+    }
+  });
+
+  it('rebuilds session rows field by field, dropping the unreadable ones', () => {
+    const result = roundTrip((p) => {
+      (p.profiles as Record<string, unknown>[])[0].sessions = [
+        { startedAt: 'a', endedAt: 'b', correctChars: 100, activeMs: 60000, accuracy: 0.9, wpm: 20, extra: '<b>x</b>' },
+        { correctChars: 'not a number' },
+        'not even an object',
+      ];
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.profiles[0].sessions).toHaveLength(1);
+      expect('extra' in result.profiles[0].sessions[0]).toBe(false);
+      expect(result.profiles[0].sessions[0].correctChars).toBe(100);
+    }
+  });
+
+  it('clamps out-of-range numbers instead of trusting them', () => {
+    const result = roundTrip((p) => {
+      (p.profiles as Record<string, unknown>[])[0].sessions = [
+        { startedAt: 'a', endedAt: 'b', correctChars: -50, activeMs: 60000, accuracy: 7, wpm: -1 },
+      ];
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const s = result.profiles[0].sessions[0];
+      expect(s.correctChars).toBe(0);
+      expect(s.accuracy).toBe(1);
+      expect(s.wpm).toBe(0);
+    }
+  });
+
+  it('caps a very long profile name', () => {
+    const result = roundTrip((p) => {
+      (p.profiles as Record<string, unknown>[])[0].name = 'x'.repeat(5000);
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.profiles[0].name.length).toBeLessThanOrEqual(40);
+  });
+});
+
+describe('escapeHtml covers attribute context', () => {
+  it('escapes quotes as well as angle brackets', async () => {
+    const { escapeHtml } = await import('../src/ui/prompt');
+    expect(escapeHtml(`"><img>'`)).toBe('&quot;&gt;&lt;img&gt;&#39;');
+  });
+});

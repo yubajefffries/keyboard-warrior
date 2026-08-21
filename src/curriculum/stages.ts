@@ -6,8 +6,6 @@
  * Stages 3-10 arrive in later phases; the shape here is what they plug into.
  */
 
-import { mulberry32 } from '../util/rand';
-import type { TokenSource } from '../content/sequences';
 import { LESSON_MIN_ACCURACY, STAGE_WPM_FLOOR } from '../profile/types';
 
 export interface Lesson {
@@ -172,30 +170,6 @@ export function validateStages(): string[] {
     }
   }
   return problems;
-}
-
-/** Serves a lesson's tokens without repeating any of the last three. */
-export class LessonSource implements TokenSource {
-  private rand: () => number;
-  private recent: string[] = [];
-  private pool: string[];
-
-  constructor(lesson: Lesson, seed: number) {
-    this.pool = lesson.pool;
-    this.rand = mulberry32(seed);
-  }
-
-  next(): string {
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const token = this.pool[Math.floor(this.rand() * this.pool.length)];
-      if (!this.recent.includes(token)) {
-        this.recent.push(token);
-        if (this.recent.length > 3) this.recent.shift();
-        return token;
-      }
-    }
-    return this.pool[Math.floor(this.rand() * this.pool.length)];
-  }
 }
 
 export interface LessonOutcome {
