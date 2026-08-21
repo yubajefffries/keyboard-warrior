@@ -10,9 +10,9 @@
  * strength, and colouring it green would lie.
  */
 
-import { keyReport, type KeyReport } from '../profile/mastery';
-import { MASTERY_MIN_SAMPLES, type Profile, type KeyState } from '../profile/types';
-import { STAGES } from '../curriculum/stages';
+import { gateStatus, keyReport, type KeyReport } from '../profile/mastery';
+import { MASTERY_MIN_SAMPLES, MASTERY_RECENT_DAYS, type Profile, type KeyState } from '../profile/types';
+import { STAGES, keysTaughtThrough } from '../curriculum/stages';
 import { escapeHtml } from './prompt';
 
 const ROWS: string[][] = [
@@ -58,10 +58,16 @@ export function renderProgress(profile: Profile): string {
         <span class="sw practiced"></span> in progress
         <span class="sw introduced"></span> just introduced
         <span class="sw decayed"></span> slipping
+        <span class="sw unverified"></span> needs re-checking
         <span class="sw unseen"></span> not taught yet
       </p>
-      <p class="note">A key is only judged after ${MASTERY_MIN_SAMPLES} presses. Until then it reads as introduced,
-         however clean it looks: two correct presses is not evidence.</p>
+      <p class="note">A key is only judged on its last ${MASTERY_MIN_SAMPLES} presses within
+         ${MASTERY_RECENT_DAYS} days. Until then it reads as introduced, however clean it looks:
+         two correct presses is not evidence. A dot marks a key that turns up too rarely to judge
+         often &mdash; those never hold a stage up.</p>
+
+      <h2>Stage ${profile.stage}</h2>
+      ${gateSummary(profile)}
 
       <h2>Curriculum</h2>
       ${stageList(profile)}
@@ -136,12 +142,39 @@ function heatmap(report: Map<string, KeyReport>): string {
           const r = report.get(key);
           const state = r?.state ?? 'unseen';
           const title = r
-            ? `${key.toUpperCase()}: ${STATE_LABEL[state]}, ${Math.round(r.accuracy * 100)}% over ${r.presses} presses`
+            ? `${key.toUpperCase()}: ${STATE_LABEL[state]}, ${Math.round(r.accuracy * 100)}% over its last ${r.presses} presses` +
+              (r.lowExposure ? '. Appears rarely, so it never blocks a stage.' : '')
             : `${key.toUpperCase()}: ${STATE_LABEL.unseen}`;
-          return `<div class="heatkey ${state}" title="${escapeHtml(title)}"><span>${escapeHtml(key)}</span></div>`;
+          const rare = r?.lowExposure ? ' rare' : '';
+          return `<div class="heatkey ${state}${rare}" title="${escapeHtml(title)}"><span>${escapeHtml(key)}</span></div>`;
         })
         .join('')}</div>`,
   ).join('')}</div>`;
+}
+
+/**
+ * Why the current stage is or is not going to close. PRD 12 gates a stage on
+ * its taught frequent keys being mastered, and "I passed every lesson and
+ * nothing happened" is the most confusing thing this game could do silently.
+ */
+function gateSummary(profile: Profile): string {
+  const gate = gateStatus(profile, keysTaughtThrough(profile.stage));
+  if (gate.ready) {
+    return `<p class="note">Every key this stage teaches is solid. Passing its last lesson closes it.</p>`;
+  }
+  const rows = gate.blocking
+    .slice(0, 6)
+    .map((b) => {
+      const why =
+        b.needed > 0
+          ? `${b.needed} more press${b.needed === 1 ? '' : 'es'} to judge`
+          : `${Math.round(b.accuracy * 100)}% of its last ${b.presses}`;
+      return `<div class="rl"><span>${b.key.toUpperCase()} &mdash; ${STATE_LABEL[b.state]}</span><b>${why}</b></div>`;
+    })
+    .join('');
+  return `
+    <div class="result-lines">${rows}</div>
+    ${gate.waived.length ? `<p class="note">${gate.waived.map((k) => k.toUpperCase()).join(', ')} appear too rarely to be held against you.</p>` : ''}`;
 }
 
 function stageList(profile: Profile): string {

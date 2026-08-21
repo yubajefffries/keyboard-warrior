@@ -16,13 +16,20 @@
  */
 
 import {
+  MASTERY_WINDOW,
   PROFILE_SCHEMA_VERSION,
   defaultSettings,
+  emptyKeyAggregate,
   emptyKeyTable,
+  type KeyState,
   type Profile,
   type ProfileSettings,
   type Route,
 } from './types';
+
+const KEY_STATES: KeyState[] = [
+  'unseen', 'introduced', 'practiced', 'mastered', 'decayed', 'unverified',
+];
 
 const APP_TAG = 'keyboard-warrior';
 
@@ -117,12 +124,55 @@ export function importProfiles(text: string): ImportResult {
   return { ok: true, profiles: migrated, migratedFrom: version < PROFILE_SCHEMA_VERSION ? version : null };
 }
 
-type ProfileResult = { ok: true; profile: Profile } | { ok: false; error: string };
+export interface LoadResult {
+  profiles: Profile[];
+  /** Profiles that could not be read and were left behind. */
+  dropped: number;
+  /** Set when the stored blob was an older format. */
+  migratedFrom: number | null;
+}
 
 /**
- * Migration seam. There is only one format so far; the table exists so adding
- * v2 is a mechanical edit rather than a rewrite of the import path.
+ * Read profiles out of browser storage.
+ *
+ * This is the same migration and validation path as `importProfiles`, and it
+ * has to be: a save written by an older build is sitting in localStorage right
+ * now, and code that reads it without upgrading it gets a profile missing
+ * every field the current mastery engine expects.
+ *
+ * The one difference is what happens to a bad profile. An import is a file the
+ * player just handed over, so all-or-nothing is right. Storage is the family's
+ * only copy, so one unreadable profile must not take the others down with it:
+ * it is dropped, counted, and the caller can say so.
  */
+export function loadStoredProfiles(raw: unknown): LoadResult {
+  if (!isPlainObject(raw) || !Array.isArray(raw.profiles)) {
+    return { profiles: [], dropped: 0, migratedFrom: null };
+  }
+  const version =
+    typeof raw.schemaVersion === 'number' && Number.isInteger(raw.schemaVersion) && raw.schemaVersion >= 1
+      ? raw.schemaVersion
+      : 1;
+  // A blob from a NEWER build cannot be safely downgraded. Leave it alone
+  // rather than half-reading it: the player still has their file export, and
+  // silently discarding fields the new build wrote would be worse.
+  if (version > PROFILE_SCHEMA_VERSION) {
+    return { profiles: [], dropped: raw.profiles.length, migratedFrom: null };
+  }
+
+  const profiles: Profile[] = [];
+  let dropped = 0;
+  for (const candidate of raw.profiles) {
+    const result = migrateProfile(candidate, version);
+    if (result.ok) profiles.push(result.profile);
+    else dropped += 1;
+  }
+  return { profiles, dropped, migratedFrom: version < PROFILE_SCHEMA_VERSION ? version : null };
+}
+
+type ProfileResult = { ok: true; profile: Profile } | { ok: false; error: string };
+
+/** Runs a save through every migration between its format and this build's. */
 function migrateProfile(input: unknown, fromVersion: number): ProfileResult {
   let candidate = input;
   for (let v = fromVersion; v < PROFILE_SCHEMA_VERSION; v++) {
@@ -134,7 +184,48 @@ function migrateProfile(input: unknown, fromVersion: number): ProfileResult {
 }
 
 /** version N -> N+1. Keyed by the version being migrated FROM. */
-const MIGRATIONS: Record<number, (p: unknown) => unknown> = {};
+const MIGRATIONS: Record<number, (p: unknown) => unknown> = {
+  /**
+   * v1 -> v2, the mastery gates.
+   *
+   * v1 stored lifetime accuracy and a per-context `state`. It has no rolling
+   * outcome window, no per-day tally, and no per-session counts, so none of
+   * that can be invented here: the new fields start empty and the window
+   * readings fall back to lifetime until real samples refill them. What CAN be
+   * carried across is the verdict the player already earned, so the old
+   * per-context states are folded into one table and the best one wins. The
+   * alternative was demoting every key in every existing save to unjudged.
+   */
+  1: (input) => {
+    if (!isPlainObject(input)) return input;
+    const out = { ...input } as Record<string, unknown>;
+    const keyStates: Record<string, string> = {};
+    const keys = isPlainObject(input.keys) ? input.keys : {};
+    const rank: Record<string, number> = {
+      unseen: 0, introduced: 1, decayed: 2, practiced: 3, unverified: 4, mastered: 5,
+    };
+    const migratedKeys: Record<string, Record<string, unknown>> = {};
+    for (const context of ['learn', 'combat', 'speed_test']) {
+      const bucket = (keys as Record<string, unknown>)[context];
+      if (!isPlainObject(bucket)) continue;
+      const outBucket: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(bucket)) {
+        if (!isPlainObject(value)) continue;
+        const state = typeof value.state === 'string' ? value.state : 'unseen';
+        if ((rank[state] ?? 0) > (rank[keyStates[key]] ?? -1)) keyStates[key] = state;
+        const { state: _dropped, ...rest } = value;
+        outBucket[key] = {
+          ...emptyKeyAggregate(),
+          ...rest,
+        };
+      }
+      migratedKeys[context] = outBucket;
+    }
+    out.keys = migratedKeys;
+    out.keyStates = keyStates;
+    return out;
+  },
+};
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -179,11 +270,27 @@ export function validateProfile(input: unknown): ProfileResult {
       : [],
     settings: mergeSettings(input.settings, route),
     keys: keys.value,
+    keyStates: validateKeyStates(input.keyStates),
     sessions: input.sessions as Profile['sessions'],
     speedTests: input.speedTests as Profile['speedTests'],
     placement: isPlainObject(input.placement) ? (input.placement as unknown as Profile['placement']) : null,
   };
   return { ok: true, profile };
+}
+
+/**
+ * An unknown state string is dropped rather than trusted. The next run of the
+ * mastery engine recomputes it from the samples, which are the real record.
+ */
+function validateKeyStates(input: unknown): Record<string, KeyState> {
+  if (!isPlainObject(input)) return {};
+  const out: Record<string, KeyState> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (typeof value === 'string' && KEY_STATES.includes(value as KeyState)) {
+      out[key] = value as KeyState;
+    }
+  }
+  return out;
 }
 
 function mergeSettings(input: unknown, route: Route): ProfileSettings {
@@ -220,15 +327,31 @@ function validateKeys(input: unknown): KeysResult {
       if (typeof errors !== 'number' || errors < 0 || errors > presses) {
         return { ok: false, error: `Key ${JSON.stringify(key)} has more errors than presses.` };
       }
+      // The window fields are repaired rather than rejected: they are derived
+      // data that rebuilds itself from play, so a hand-trimmed export loses
+      // some precision instead of the whole save.
       table[context][key] = {
         presses,
         errors,
         recentIntervals: Array.isArray(value.recentIntervals)
           ? value.recentIntervals.filter((n): n is number => typeof n === 'number' && n >= 0)
           : [],
+        recentOutcomes:
+          typeof value.recentOutcomes === 'string' && /^[01]*$/.test(value.recentOutcomes)
+            ? value.recentOutcomes.slice(-MASTERY_WINDOW)
+            : '',
+        daily: Array.isArray(value.daily)
+          ? (value.daily.filter(
+              (row) =>
+                Array.isArray(row) && typeof row[0] === 'string' && typeof row[1] === 'number' && row[1] >= 0,
+            ) as [string, number][])
+          : [],
+        sessionPresses: Array.isArray(value.sessionPresses)
+          ? value.sessionPresses.filter((n): n is number => typeof n === 'number' && n >= 0)
+          : [],
+        lastSessionId: typeof value.lastSessionId === 'string' ? value.lastSessionId : null,
         baselineMs: typeof value.baselineMs === 'number' ? value.baselineMs : null,
         lastSeen: typeof value.lastSeen === 'string' ? value.lastSeen : null,
-        state: typeof value.state === 'string' ? (value.state as Profile['keys']['learn'][string]['state']) : 'unseen',
         confusedWith: isPlainObject(value.confusedWith)
           ? (Object.fromEntries(
               Object.entries(value.confusedWith).filter(([, n]) => typeof n === 'number'),

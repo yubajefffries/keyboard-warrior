@@ -11,7 +11,7 @@
  * into the burst-test numbers.
  */
 
-import { FINGER_OF } from '../profile/mastery';
+import { FINGER_LABEL, FINGER_OF } from '../profile/mastery';
 
 /** US QWERTY, the only layout the PRD supports. */
 const ROWS: string[][] = [
@@ -112,15 +112,49 @@ export class KeyboardViz {
 }
 
 /**
- * PRD 10: Settings force On or Off and override auto. Auto resolves against
- * mastery, which is Phase 1b; until then auto follows the route the placement
- * drill assigned, which is the same signal auto-hide will eventually refine.
+ * PRD 10: Settings force On or Off and override auto. `autoWants` is what the
+ * mastery engine concluded; the caller computes it, because the keyboard has
+ * no business knowing how mastery works.
  */
-export function resolveVisibility(
-  pref: 'auto' | 'on' | 'off',
-  route: 'beginner' | 'intermediate' | 'advanced',
-): boolean {
+export function resolveVisibility(pref: 'auto' | 'on' | 'off', autoWants: boolean): boolean {
   if (pref === 'on') return true;
   if (pref === 'off') return false;
-  return route === 'beginner';
+  return autoWants;
+}
+
+/**
+ * PRD 10: when the keyboard is hidden, a brief non-intrusive finger-zone hint
+ * MAY flash after repeated errors on the same key.
+ *
+ * This is what makes auto-hide safe to ship. Hiding the scaffold is the point
+ * of learning to touch type, but a player who has genuinely lost a key needs
+ * somewhere to go that is not "look down", which undoes the habit the hiding
+ * was building. It names the finger, not the location.
+ */
+export class FingerHint {
+  private el: HTMLElement;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(el: HTMLElement) {
+    this.el = el;
+    this.el.className = 'fingerhint';
+  }
+
+  show(key: string, durationMs = 1800): void {
+    const finger = FINGER_OF[key];
+    if (!finger) return;
+    this.el.innerHTML =
+      `<b>${key === ' ' ? 'space' : key.toUpperCase()}</b>` +
+      `<span>${FINGER_LABEL[finger] ?? finger}</span>`;
+    this.el.style.setProperty('--finger', FINGER_COLORS[finger] ?? '#7f858c');
+    this.el.classList.add('on');
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.hide(), durationMs);
+  }
+
+  hide(): void {
+    this.el.classList.remove('on');
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.timer = null;
+  }
 }

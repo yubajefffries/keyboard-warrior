@@ -45,8 +45,17 @@ export interface EncounterDeps {
   lookahead: () => number;
 }
 
+/** Consecutive misses on one key before the finger hint offers itself. PRD 10. */
+export const HINT_AFTER_CONSECUTIVE_MISSES = 3;
+
 export interface EncounterCallbacks {
   onDeath?: (diagnosis: string) => void;
+  /**
+   * The same key has been missed several times running. The app decides
+   * whether to surface a finger hint, since only it knows whether the
+   * keyboard is currently on screen.
+   */
+  onStruggle?: (key: string) => void;
   onTokenComplete?: (token: string, completed: number) => void;
   onPause?: (reason: string) => void;
   onBurstReport?: (html: string, report: RobotReport) => void;
@@ -93,6 +102,8 @@ export class Encounter {
   private correctChars = 0;
   private activeMs = 0;
   private attempts = new Map<string, { errors: number; presses: number }>();
+  private struggleKey: string | null = null;
+  private struggleCount = 0;
   private spawnEnemies = true;
 
   // Robot burst (see docs/BURST_TESTING.md)
@@ -178,6 +189,9 @@ export class Encounter {
         this.bump(char, true);
         this.correctChars += 1;
         this.deps.keyboard?.flash(char, 'hit');
+        // A clean press clears the struggle: the hint is for a key that is
+        // genuinely lost, not for one fumbled once.
+        if (this.struggleKey === char) this.resetStruggle();
         this.redrawActive();
       },
       onMiss: (expected, pressed) => {
@@ -185,6 +199,7 @@ export class Encounter {
         this.bump(expected, false);
         this.deps.prompt.flashError(performance.now());
         this.deps.keyboard?.flash(pressed, 'miss');
+        this.noteStruggle(expected);
         this.redrawActive();
       },
       onComplete: (token) => {
@@ -242,6 +257,7 @@ export class Encounter {
     this.correctChars = 0;
     this.activeMs = 0;
     this.spawnTimer = 0;
+    this.resetStruggle();
     this.state = 'running';
     this.typing.setEnabled(true);
     if (this.spawnEnemies) {
@@ -355,6 +371,23 @@ export class Encounter {
   }
 
   // ---------- internals ----------
+  private noteStruggle(key: string): void {
+    if (this.struggleKey === key) this.struggleCount += 1;
+    else {
+      this.struggleKey = key;
+      this.struggleCount = 1;
+    }
+    if (this.struggleCount >= HINT_AFTER_CONSECUTIVE_MISSES) {
+      this.cb.onStruggle?.(key);
+      this.resetStruggle();
+    }
+  }
+
+  private resetStruggle(): void {
+    this.struggleKey = null;
+    this.struggleCount = 0;
+  }
+
   private bump(key: string, correct: boolean): void {
     const row = this.attempts.get(key) ?? { errors: 0, presses: 0 };
     row.presses += 1;

@@ -23,6 +23,7 @@ import {
   type SessionSummary,
   type SpeedTestResult,
 } from './types';
+import { loadStoredProfiles } from './transfer';
 
 const STORAGE_KEY = 'kw.profiles';
 const ACTIVE_KEY = 'kw.activeProfile';
@@ -70,6 +71,7 @@ export function createProfile(name: string, route: Route = 'beginner'): Profile 
     stagesCleared: [],
     settings: defaultSettings(route),
     keys: emptyKeyTable(),
+    keyStates: {},
     sessions: [],
     speedTests: [],
     placement: null,
@@ -81,14 +83,26 @@ export class ProfileStore {
   private activeId: string | null = null;
   /** False when storage is unavailable, so the UI can warn about export. */
   readonly persistent: boolean;
+  /** Profiles in storage that could not be read. Surfaced, never swallowed. */
+  readonly dropped: number = 0;
+  /** Set when the stored save was written by an older build. */
+  readonly migratedFrom: number | null = null;
 
   constructor() {
     const raw = readRaw();
     this.persistent = raw !== null || writeRaw(JSON.stringify({ schemaVersion: PROFILE_SCHEMA_VERSION, profiles: [] }));
     if (raw) {
       try {
-        const parsed = JSON.parse(raw) as StoredState;
-        if (Array.isArray(parsed?.profiles)) this.profiles = parsed.profiles;
+        // Through the same migration and validation path as a file import.
+        // A save written by an older build is not a hypothetical: one is
+        // sitting in localStorage the moment this ships.
+        const result = loadStoredProfiles(JSON.parse(raw));
+        this.profiles = result.profiles;
+        this.dropped = result.dropped;
+        this.migratedFrom = result.migratedFrom;
+        // Write the upgraded shape straight back, so the migration runs once
+        // rather than on every load for the rest of the profile's life.
+        if (result.migratedFrom !== null) this.save();
       } catch {
         // Corrupt blob: start clean rather than half-load. The player's real
         // backup is the export file.

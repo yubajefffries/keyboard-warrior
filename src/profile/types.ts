@@ -11,8 +11,17 @@
 
 import type { StatContext } from '../stats/keystats';
 
-/** Bumped whenever the persisted shape changes. Import migrates forward. */
-export const PROFILE_SCHEMA_VERSION = 1;
+/**
+ * Bumped whenever the persisted shape changes. Import migrates forward.
+ *
+ * v2 (mastery gates): per-key aggregates gained a rolling outcome window, a
+ * per-day tally, and per-session press counts, because v1 could only answer
+ * "accuracy over all time", and every rule in PRD 12 is about a window. Key
+ * state moved off the per-context aggregate to one table on the profile:
+ * a key is mastered or not, and having three per-context answers to that was
+ * three chances to disagree.
+ */
+export const PROFILE_SCHEMA_VERSION = 2;
 
 // ---------- Tunable constants (PRD 12, 21) ----------
 /** Presses a key is judged over. PRD 12. */
@@ -27,6 +36,18 @@ export const BASELINE_MIN_SESSION_SAMPLES = 10;
 export const LOW_EXPOSURE_RATE = 10;
 /** Days without a sample before a mastered key becomes unverified. PRD 12 [REVIEW]. */
 export const STALENESS_DAYS = 30;
+/** The window MASTERY_MIN_SAMPLES must fall inside. PRD 12. */
+export const MASTERY_RECENT_DAYS = 7;
+/** Sessions the low-exposure rate rolls over. PRD 12. */
+export const EXPOSURE_SESSIONS = 5;
+/** Rolling accuracy under which a mastered key silently decays. PRD 12. */
+export const DECAY_ACCURACY = 0.85;
+/** Accuracy a key needs across its window to be mastered. PRD 12. */
+export const MASTERY_ACCURACY = 0.95;
+/** Speed allowance against a key's own improving baseline. PRD 12. */
+export const MASTERY_BASELINE_FACTOR = 1.5;
+/** Speed allowance for a key too new to have a baseline, vs its finger. PRD 12. */
+export const MASTERY_FINGER_FACTOR = 1.8;
 /** PRD 21 [REVIEW]. */
 export const MAX_PROFILES = 10;
 /** Idle gap that separates one session from the next. PRD 21. */
@@ -52,15 +73,28 @@ export type KeyState = 'unseen' | 'introduced' | 'practiced' | 'mastered' | 'dec
  * derivable from a capped window.
  */
 export interface KeyAggregate {
+  /** Lifetime, for the progress screen. Every rule uses the window instead. */
   presses: number;
   errors: number;
-  /** Last MASTERY_WINDOW inter-key intervals, ms. Oldest first. */
+  /** Last MASTERY_WINDOW inter-key intervals, ms, rounded. Oldest first. */
   recentIntervals: number[];
+  /**
+   * Last MASTERY_WINDOW outcomes as '1' hit / '0' miss, oldest first. Packed
+   * into a string because 75 booleans per key per context, times a household
+   * of profiles, is the difference between a save that fits in localStorage
+   * and one that does not.
+   */
+  recentOutcomes: string;
+  /** Presses per day, newest first, capped just past the evaluation window. */
+  daily: [string, number][];
+  /** Presses in each of the last EXPOSURE_SESSIONS sessions, newest first. */
+  sessionPresses: number[];
+  /** Which session last touched this key, so one session counts once. */
+  lastSessionId: string | null;
   /** EMA of per-session median inter-key interval. Null until it qualifies. */
   baselineMs: number | null;
   /** ISO timestamp of the most recent press, for staleness. */
   lastSeen: string | null;
-  state: KeyState;
   /** Wrong keys pressed when this key was expected. */
   confusedWith: Record<string, number>;
 }
@@ -70,9 +104,12 @@ export function emptyKeyAggregate(): KeyAggregate {
     presses: 0,
     errors: 0,
     recentIntervals: [],
+    recentOutcomes: '',
+    daily: [],
+    sessionPresses: [],
+    lastSessionId: null,
     baselineMs: null,
     lastSeen: null,
-    state: 'unseen',
     confusedWith: {},
   };
 }
@@ -153,6 +190,13 @@ export interface Profile {
   settings: ProfileSettings;
   /** Per-key aggregates, split by context. PRD 12. */
   keys: Record<StatContext, Record<string, KeyAggregate>>;
+  /**
+   * The state of each key, once per key rather than once per context. PRD 12
+   * says samples are stored by context and that adaptive content should prefer
+   * combat and speed-test samples; the verdict those samples produce is still
+   * a single fact about the player's finger.
+   */
+  keyStates: Record<string, KeyState>;
   sessions: SessionSummary[];
   speedTests: SpeedTestResult[];
   placement: PlacementResult | null;

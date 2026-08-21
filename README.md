@@ -30,7 +30,11 @@ npm run dev
 | Progress screen: WPM/accuracy history, per-key heatmap, stage gates | done |
 | Export / import JSON with validation and migration | done |
 | Speed Test 30s / 60s | done |
-| Mastery engine: decay, staleness, auto-hide | aggregation and key states in; gates land in Phase 1b |
+| Mastery engine: windows, decay, staleness, low-exposure | done |
+| Stage gate: taught frequent keys mastered + final lesson passed | done |
+| Keyboard auto-hide, and the finger hint that makes it safe | done |
+| Weak-key injection into lesson content (PRD 13) | done |
+| Adaptive difficulty: enemy timing from recent WPM (PRD 13) | not yet |
 | Stages 3-10 | later phases; `STAGE_KEYS` already knows what they teach, so content filtering is correct for a profile placed into them |
 
 ## Architecture rules
@@ -43,7 +47,10 @@ npm run dev
 - Upcoming prompts come from a `TokenQueue`, so what is drawn as "coming up" is exactly what arrives. The display can never promise a word the source then changes.
 - Browser storage is volatile and treated that way: every write is best-effort, a blocked store is surfaced rather than swallowed, and the export file is the durable copy.
 - Import validates every profile before accepting any of them. A newer format is refused with a message; a malformed file changes nothing.
-- Per-key history is capped by construction (a rolling window of intervals, not raw samples), so a long-lived family profile cannot grow without bound.
+- Per-key history is capped by construction (rolling windows, not raw samples), so a long-lived family profile cannot grow without bound.
+- Every mastery rule reads a window, never a lifetime total. A player who was 60% on K last month and is 98% today has mastered K.
+- Nothing about mastery is announced. A decayed key quietly turns up more often; the game never says "you forgot R".
+- Saves loaded from browser storage go through the same migration and validation as an imported file. Code that reads an old blob without upgrading it gets a profile missing every field the current engine expects.
 
 ## Phase 0 exit gates (still open)
 

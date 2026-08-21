@@ -13,11 +13,11 @@
 import { InputPipeline } from '../input/pipeline';
 import { WeaponAudio } from '../audio/sfx';
 import { PromptView, escapeHtml } from '../ui/prompt';
-import { KeyboardViz, resolveVisibility } from '../ui/keyboard';
+import { FingerHint, KeyboardViz, resolveVisibility } from '../ui/keyboard';
 import { renderProgress } from '../ui/progress';
 import { Encounter } from '../game/encounter';
 import { TimedDrill } from '../modes/drill';
-import { absorbSamples } from '../profile/mastery';
+import { absorbSamples, autoKeyboardVisible, gateStatus } from '../profile/mastery';
 import {
   ProfileStore,
   createProfile,
@@ -34,7 +34,8 @@ import {
   routeFor,
   type PlacementRoute,
 } from '../placement/placement';
-import { LessonSource, judgeLesson, lessonAt, stage, keysTaughtThrough, STAGES } from '../curriculum/stages';
+import { judgeLesson, lessonAt, stage, keysTaughtThrough, STAGES } from '../curriculum/stages';
+import { AdaptiveSource, planFor, practiceNote } from '../curriculum/adaptive';
 import {
   PHASE_1A_DURATIONS,
   SpeedTestScorer,
@@ -59,6 +60,7 @@ const pipeline = new InputPipeline();
 const audio = new WeaponAudio();
 const prompt = new PromptView({ active: $('prompt'), past: $('promptPast'), next: $('promptNext') });
 const keyboard = new KeyboardViz($('kbviz'));
+const fingerHint = new FingerHint($('fingerHint'));
 
 let profile: Profile | null = null;
 
@@ -106,7 +108,12 @@ let forceKeyboard = false;
 function keyboardWanted(): boolean {
   if (forceKeyboard) return true;
   if (!profile) return false;
-  return resolveVisibility(profile.settings.keyboardViz, profile.route);
+  // Auto asks the mastery engine, which hides the scaffold once every taught
+  // frequent key is mastered and brings it back if one decays.
+  return resolveVisibility(
+    profile.settings.keyboardViz,
+    autoKeyboardVisible(profile, keysTaughtThrough(profile.stage)),
+  );
 }
 
 function showScreen(html: string, opts: { dim?: boolean } = {}): void {
@@ -160,6 +167,8 @@ function showProfiles(): void {
       </div>
       ${store.atCapacity ? `<p class="note" style="text-align:center">This browser holds the maximum of ${MAX_PROFILES} profiles.</p>` : ''}
       ${store.persistent ? '' : '<p class="msg bad">This browser is blocking storage. You can play, but nothing will be saved unless you export.</p>'}
+      ${store.dropped > 0 ? `<p class="msg bad">${store.dropped} saved profile${store.dropped === 1 ? '' : 's'} could not be read and ${store.dropped === 1 ? 'was' : 'were'} left out. If you have an export file, import it.</p>` : ''}
+      ${store.migratedFrom !== null ? `<p class="msg good">Your save was upgraded from an older version of the game.</p>` : ''}
       <p id="transferMsg" class="msg"></p>
     </div>`);
 
@@ -411,6 +420,7 @@ function startLesson(): void {
       <p class="sub">Stage ${profile.stage}, lesson ${profile.lesson + 1}</p>
       <p class="lead">${escapeHtml(lesson.objective)}</p>
       ${lesson.introduces.length ? `<p>New keys: <b>${lesson.introduces.map((k) => k.toUpperCase()).join('  ')}</b></p>` : ''}
+      ${practiceNote(profile, planFor(profile, lesson)) ? `<p>${escapeHtml(practiceNote(profile, planFor(profile, lesson))!)}</p>` : ''}
       <p>${lesson.targetTokens} sequences. Wrong key is a dry fire, and the cursor waits: fix it and carry on.
          Backspace does nothing here.</p>
       <div class="rowbtns">
@@ -435,12 +445,19 @@ function runLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
     },
     onDeath: (diagnosis) => showDeath(diagnosis),
     onPause: (reason) => showPause(reason),
+    onStruggle: (key) => {
+      // Only when the scaffold is off. If the keyboard is already on screen
+      // the answer is in front of them and a second hint is just noise.
+      if (!keyboard.shown) fingerHint.show(key);
+    },
     onBurstReport: (html) => {
       robotPanel.style.display = 'block';
       robotPanel.innerHTML = html;
     },
   });
-  encounter.start(new LessonSource(lesson, Date.now() & 0xffff));
+  // Weak keys are over-represented inside the PRD's limits; a decayed key
+  // rejoins the pool here, silently.
+  encounter.start(new AdaptiveSource(lesson, planFor(profile, lesson), Date.now() & 0xffff));
 }
 
 function finishLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
@@ -451,26 +468,41 @@ function finishLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
 
   const outcome = judgeLesson(profile.stage, p.accuracy, p.wpm, p.tokensCompleted, encounter.worstKey());
 
+  // Session first: it decides which session id the samples belong to, and the
+  // low-exposure rate is measured per session, not per lesson.
+  const session = recordActivity(profile, {
+    correctChars: p.correctChars,
+    activeMs: p.activeMs,
+    accuracy: p.accuracy,
+  });
   // Fold the samples in whatever the verdict: a failed lesson is still real
   // typing, and mastery needs the evidence more than the scoreboard does.
-  absorbSamples(profile, encounter.stats.samplesIn('combat'));
-  recordActivity(profile, { correctChars: p.correctChars, activeMs: p.activeMs, accuracy: p.accuracy });
+  absorbSamples(profile, encounter.stats.samplesIn('combat'), { sessionId: session.startedAt });
 
+  const wasStage = profile.stage;
   let advanced = false;
   let stageCleared = false;
+  /** Set when the last lesson passed but the stage's keys are not there yet. */
+  let gate: ReturnType<typeof gateStatus> | null = null;
+
   if (outcome.passed) {
     const stageInfo = stage(profile.stage);
     if (stageInfo && profile.lesson + 1 < stageInfo.lessons.length) {
       profile.lesson += 1;
       advanced = true;
     } else {
-      if (!profile.stagesCleared.includes(profile.stage)) profile.stagesCleared.push(profile.stage);
-      stageCleared = true;
-      const next = STAGES.find((s) => s.number > profile!.stage);
-      if (next) {
-        profile.stage = next.number;
-        profile.lesson = 0;
-        advanced = true;
+      // PRD 12: a stage completes when its taught FREQUENT keys are mastered
+      // AND its final lesson is passed. Passing the last lesson is only half.
+      gate = gateStatus(profile, keysTaughtThrough(profile.stage));
+      if (gate.ready) {
+        if (!profile.stagesCleared.includes(profile.stage)) profile.stagesCleared.push(profile.stage);
+        stageCleared = true;
+        const next = STAGES.find((s) => s.number > profile!.stage);
+        if (next) {
+          profile.stage = next.number;
+          profile.lesson = 0;
+          advanced = true;
+        }
       }
     }
   }
@@ -486,7 +518,8 @@ function finishLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
         <div class="rl"><span>Speed</span><b>${Math.round(outcome.wpm)} WPM</b></div>
         <div class="rl"><span>Sequences</span><b>${outcome.tokensCompleted}</b></div>
       </div>
-      ${stageCleared ? '<p class="lead" style="margin-top:18px">Stage cleared. Export your progress from the Progress screen while you are thinking about it.</p>' : ''}
+      ${stageCleared ? `<p class="lead" style="margin-top:18px">Stage ${wasStage} cleared. Export your progress from the Progress screen while you are thinking about it.</p>` : ''}
+      ${gate && !gate.ready ? gateBlock(gate) : ''}
       <div class="rowbtns">
         ${outcome.passed && advanced ? '<button id="nextLesson">Next lesson</button>' : '<button id="retryLesson">Try it again</button>'}
         <button id="resultMenu" class="ghost">Back to menu</button>
@@ -495,6 +528,27 @@ function finishLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
   on('nextLesson', startLesson);
   on('retryLesson', () => runLesson(lesson));
   on('resultMenu', showMenu);
+}
+
+/**
+ * The stage gate held. Say exactly which keys and what would move them, since
+ * "passed the lesson but the stage did not close" is otherwise baffling.
+ */
+function gateBlock(gate: ReturnType<typeof gateStatus>): string {
+  const rows = gate.blocking
+    .slice(0, 4)
+    .map((b) => {
+      const why =
+        b.needed > 0
+          ? `${b.needed} more press${b.needed === 1 ? '' : 'es'} before it can be judged`
+          : `${Math.round(b.accuracy * 100)}% over its last ${b.presses}`;
+      return `<div class="rl"><span>${b.key.toUpperCase()}</span><b>${why}</b></div>`;
+    })
+    .join('');
+  return `
+    <p class="lead" style="margin-top:18px">Lesson passed. The stage stays open until these keys are solid.</p>
+    <div class="result-lines">${rows}</div>
+    ${gate.waived.length ? `<p class="note" style="text-align:center;margin-top:10px">${gate.waived.map((k) => k.toUpperCase()).join(', ')} appear too rarely to hold the stage up, so they are not blocking.</p>` : ''}`;
 }
 
 /** PRD 16: death is a checkpoint retry with one diagnosis line, nothing more. */
@@ -592,7 +646,12 @@ function runSpeedTest(durationS: 30 | 60): void {
     onTick: (remaining) => setClock(remaining),
     onFinish: (elapsed) => {
       const result = scorer.result(durationS, elapsed);
-      absorbSamples(profile!, drill.stats.samplesIn('speed_test'));
+      const session = recordActivity(profile!, {
+        correctChars: result.correctChars,
+        activeMs: elapsed,
+        accuracy: result.accuracy,
+      });
+      absorbSamples(profile!, drill.stats.samplesIn('speed_test'), { sessionId: session.startedAt });
       recordSpeedTest(profile!, result);
       save();
       showSpeedResult(result, scorer.weakest());
