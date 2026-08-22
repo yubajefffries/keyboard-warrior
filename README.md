@@ -2,6 +2,8 @@
 
 Type like your life depends on it. A first-person action typing game and touch-typing tutor for one household. Desktop browser, US QWERTY, physical keyboard required. Export your save once profiles exist (Phase 1a); browser storage is volatile.
 
+**Play it:** [keyboard-warrior-nine.vercel.app](https://keyboard-warrior-nine.vercel.app) or [yubajefffries.github.io/keyboard-warrior](https://yubajefffries.github.io/keyboard-warrior/). Profiles live in your browser's localStorage; the Progress screen's export button is your save file.
+
 **Status: Phase 1a in progress.** Phase 0's gray-box slice proved the input pipeline and the typing-to-shoot loop; Phase 1a turns it into something a non-typist and a decent typist can both sit down with. See `docs/PRD_v0_4.md` for the full product spec.
 
 ## Run it
