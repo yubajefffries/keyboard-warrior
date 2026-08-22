@@ -404,7 +404,7 @@ function showMenu(): void {
           Switch profile<span class="sub">${store.count} on this browser</span>
         </button>
       </div>
-      ${lesson ? '' : `<p class="note" style="text-align:center;margin-top:20px">Stages 6-10 arrive in later phases. Speed test is always open.</p>`}
+      ${lesson ? '' : `<p class="note" style="text-align:center;margin-top:20px">Every stage is built. Speed test is always open.</p>`}
     </div>`);
 
   on('playLearn', startLesson);
@@ -525,7 +525,10 @@ function runLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
   hideScreen();
   setChrome({ prompt: true, hud: true, keyboard: true });
 
-  const pacing = pacingFor(profile, lesson, easingFrom(deathAccuracies));
+  // PRD 16 middle band: Stage 6+ on a non-beginner route drops the buffer to
+  // the bottom of the PRD's range. Beginners stay forgiving everywhere.
+  const tightBand = profile.stage >= 6 && profile.route !== 'beginner';
+  const pacing = pacingFor(profile, lesson, easingFrom(deathAccuracies), { tightBand });
   // Invisible to the player by design; visible to anyone tuning the constants.
   console.debug('[pacing]', pacing);
 
@@ -643,7 +646,7 @@ function finishLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
         <div class="rl"><span><b>Total</b></span><b>${score.total.toLocaleString()}</b></div>
       </div>` : ''}
       ${stageCleared && advanced ? `<p class="lead" style="margin-top:18px">Stage ${wasStage} cleared. Export your progress from the Progress screen while you are thinking about it.</p>` : ''}
-      ${stageCleared && !advanced ? `<p class="lead" style="margin-top:18px">Stage ${wasStage} cleared &mdash; and that is every stage built so far. Every letter on the board is yours. Speed test is where the numbers go up from here; Stages 6-10 (capitals, punctuation, numbers) arrive in later phases.</p>` : ''}
+      ${stageCleared && !advanced ? `<p class="lead" style="margin-top:18px">Stage ${wasStage} cleared &mdash; the whole course, from finding the two bumps to typing full transmissions under fire. The keyboard is yours now. Speed test is where the numbers keep climbing, and Survival is coming in the next phase.</p>` : ''}
       ${gate && !gate.ready ? gateBlock(gate) : ''}
       ${fatigueNote ? `<p class="note" style="text-align:center;margin-top:14px">${escapeHtml(fatigueNote)}</p>` : ''}
       <div class="rowbtns">
@@ -697,7 +700,8 @@ function showDeath(diagnosis: string, eased = false): void {
     // Re-derive pacing so timer-was-wrong deaths take effect on the retry.
     const lesson = profile ? lessonAt(profile.stage, profile.lesson) : null;
     if (profile && lesson) {
-      const pacing = pacingFor(profile, lesson, easingFrom(deathAccuracies));
+      const tightBand = profile.stage >= 6 && profile.route !== 'beginner';
+      const pacing = pacingFor(profile, lesson, easingFrom(deathAccuracies), { tightBand });
       console.debug('[pacing]', pacing);
       encounter.setPacing(pacing);
     }

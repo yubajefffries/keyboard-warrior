@@ -37,6 +37,7 @@ import {
   type Profile,
 } from './types';
 import type { KeySample, StatContext } from '../stats/keystats';
+import { UNSHIFT, isShiftedChar } from '../content/shift';
 
 const ALL_CONTEXTS: StatContext[] = ['learn', 'combat', 'speed_test'];
 /** PRD 12: adaptive content should prefer combat and speed-test samples. */
@@ -327,14 +328,14 @@ export function evaluateState(
 
 export const FINGER_OF: Record<string, string> = {};
 const FINGER_ZONES: Record<string, string> = {
-  'q a z': 'left-pinky',
-  'w s x': 'left-ring',
-  'e d c': 'left-middle',
-  'r f v t g b': 'left-index',
-  'y h n u j m': 'right-index',
-  'i k ,': 'right-middle',
-  'o l .': 'right-ring',
-  "p ; / [ ] \\ ' -": 'right-pinky',
+  'q a z 1': 'left-pinky',
+  'w s x 2': 'left-ring',
+  'e d c 3': 'left-middle',
+  'r f v t g b 4 5': 'left-index',
+  'y h n u j m 6 7': 'right-index',
+  'i k , 8': 'right-middle',
+  'o l . 9': 'right-ring',
+  "p ; / [ ] \\ ' - 0 =": 'right-pinky',
   ' ': 'thumb',
 };
 for (const [keys, finger] of Object.entries(FINGER_ZONES)) {
@@ -343,6 +344,11 @@ for (const [keys, finger] of Object.entries(FINGER_ZONES)) {
     continue;
   }
   for (const k of keys.split(' ')) FINGER_OF[k] = finger;
+}
+// A shifted character is typed by the same finger as its base key; only the
+// other hand's little finger adds the Shift.
+for (const [shifted, base] of Object.entries(UNSHIFT)) {
+  if (FINGER_OF[base]) FINGER_OF[shifted] = FINGER_OF[base];
 }
 
 export const FINGER_LABEL: Record<string, string> = {
@@ -408,6 +414,14 @@ export function gateStatus(profile: Profile, taught: Iterable<string>, now = new
   const blocking: GateStatus['blocking'] = [];
   const waived: string[] = [];
   for (const key of taught) {
+    // A shifted character is a chord on a key already gated in its own right.
+    // Its accuracy is tracked and drilled, but it never holds a stage shut:
+    // demanding 30 recent presses of every capital letter would gate Stage 6
+    // on a grind no lesson provides. PRD 5: Shift is measured, not gated.
+    if (isShiftedChar(key)) {
+      waived.push(key);
+      continue;
+    }
     const state = keyState(profile, key);
     if (state === 'mastered' || state === 'unverified') continue;
     const agg = mergedAggregate(profile, key);
@@ -434,7 +448,9 @@ export function gateStatus(profile: Profile, taught: Iterable<string>, now = new
  * the same signal that set the default in the first place.
  */
 export function autoKeyboardVisible(profile: Profile, taught: Iterable<string>): boolean {
-  const keys = [...taught];
+  // Judge only real keys: shifted chords are seldom individually judged and
+  // would otherwise hold the scaffold on screen forever from Stage 6 on.
+  const keys = [...taught].filter((k) => !isShiftedChar(k));
   const judged = keys.filter((k) => windowPresses(mergedAggregate(profile, k)) >= MASTERY_MIN_SAMPLES);
   if (judged.length === 0 || judged.length < keys.length / 2) {
     return profile.route === 'beginner';

@@ -55,7 +55,7 @@ export const SESSION_IDLE_MINUTES = 30;
 /** Lesson pass floor. PRD 12. */
 export const LESSON_MIN_ACCURACY = 0.9;
 /** Per-stage WPM floors for a lesson pass. PRD 12; values [REVIEW]. */
-export const STAGE_WPM_FLOOR: Record<number, number> = { 1: 10, 2: 12, 3: 14, 4: 16, 5: 18 };
+export const STAGE_WPM_FLOOR: Record<number, number> = { 1: 10, 2: 12, 3: 14, 4: 16, 5: 18, 6: 16, 7: 16, 8: 14, 9: 18, 10: 18 };
 /** Session history kept per profile, so a family profile cannot grow forever. */
 export const MAX_SESSION_HISTORY = 250;
 /** Speed test results kept per profile. */

@@ -35,6 +35,12 @@ import type { Lesson } from '../curriculum/stages';
 
 /** Learn-mode buffer over demonstrated pace. PRD 13 allows 20-40%. [REVIEW] */
 export const BASE_BUFFER = 0.3;
+/**
+ * The middle band (PRD 16): from Stage 6 on Intermediate and Advanced
+ * profiles, time pressure is real -- the buffer drops to the bottom of the
+ * PRD's 20-40% band. Beginners keep the full buffer at every stage.
+ */
+export const TIGHT_BUFFER = 0.2;
 /** Extra buffer per high-accuracy death: the timer-was-wrong rule. [REVIEW] */
 export const EASE_STEP = 0.25;
 /** Most easing steps that can accumulate; past this the timer is generous
@@ -138,7 +144,12 @@ export function easingFrom(deathAccuracies: number[]): number {
   return Math.min(steps, MAX_EASING_STEPS);
 }
 
-export function pacingFor(profile: Profile, lesson: Lesson, easingSteps = 0): Pacing {
+export function pacingFor(
+  profile: Profile,
+  lesson: Lesson,
+  easingSteps = 0,
+  opts: { tightBand?: boolean } = {},
+): Pacing {
   const estimate = estimateSpeed(profile, lesson.keys);
 
   // Misses cost retries under miss-and-retry, so effective throughput on the
@@ -152,7 +163,7 @@ export function pacingFor(profile: Profile, lesson: Lesson, easingSteps = 0): Pa
   const needSeconds = meanTokenChars / effectiveCps + READ_BEAT_MS / 1000;
 
   const steps = Math.min(Math.max(0, easingSteps), MAX_EASING_STEPS);
-  const buffer = BASE_BUFFER + steps * EASE_STEP;
+  const buffer = (opts.tightBand ? TIGHT_BUFFER : BASE_BUFFER) + steps * EASE_STEP;
   const secondsPerToken = needSeconds * (1 + buffer);
 
   return {

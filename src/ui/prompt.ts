@@ -29,6 +29,10 @@ export class PromptView {
 
   /** Per keystroke: done / current / remaining of the active token. */
   render(token: string, typedCount: number): void {
+    // Sentences and transmissions (Stages 9-10) cannot fit at drill size.
+    // Classes, not inline styles, so text-size and contrast settings stack.
+    this.el.active.classList.toggle('long', token.length > 22 && token.length <= 38);
+    this.el.active.classList.toggle('xlong', token.length > 38);
     const done = token.slice(0, typedCount);
     const current = token[typedCount] ?? '';
     const rest = token.slice(typedCount + 1);

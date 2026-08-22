@@ -140,6 +140,23 @@ describe('pacing (PRD 13: 20-40% more time than recent performance requires)', (
   });
 });
 
+describe('the middle band (PRD 16)', () => {
+  it('tightens the buffer for Stage 6+ on non-beginner routes', () => {
+    const p = typedProfile(300);
+    const normal = pacingFor(p, LESSON, 0);
+    const tight = pacingFor(p, LESSON, 0, { tightBand: true });
+    expect(tight.buffer).toBeLessThan(normal.buffer);
+    expect(tight.buffer).toBeGreaterThanOrEqual(0.2); // still inside the PRD band
+    expect(tight.spawnIntervalS).toBeLessThanOrEqual(normal.spawnIntervalS);
+  });
+
+  it('timer-was-wrong easing still applies on top of the tight band', () => {
+    const p = typedProfile(300);
+    const eased = pacingFor(p, LESSON, 2, { tightBand: true });
+    expect(eased.buffer).toBeGreaterThan(pacingFor(p, LESSON, 0).buffer);
+  });
+});
+
 describe('the timer-was-wrong rule (PRD 13)', () => {
   it('counts consecutive high-accuracy deaths', () => {
     expect(easingFrom([])).toBe(0);

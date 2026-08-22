@@ -4,7 +4,7 @@ Type like your life depends on it. A first-person action typing game and touch-t
 
 **Play it:** [keyboard-warrior-nine.vercel.app](https://keyboard-warrior-nine.vercel.app) or [yubajefffries.github.io/keyboard-warrior](https://yubajefffries.github.io/keyboard-warrior/). Profiles live in your browser's localStorage; the Progress screen's export button is your save file.
 
-**Status: Phase 1b complete.** Phase 0 gates cleared on real hardware. Placement, Stages 1-5, mastery gates, adaptive difficulty, scoring and combo, three enemy types, two weapons, and the abandoned laboratory are all live. Next: Phase 2 (Stages 6-10, survival, practice mode). See `docs/PRD_v0_4.md` for the full product spec.
+**Status: the full ten-stage curriculum is live.** From finding the F and J bumps to typing transmissions under fire: capitals with opposite-hand Shift visually demonstrated, punctuation, the number row, sentences, and paragraph bosses. Remaining Phase 2 scope: Survival mode, Practice mode, 5m speed test, more weapons and enemies. See `docs/PRD_v0_4.md` for the full product spec.
 
 ## Run it
 
@@ -45,7 +45,8 @@ npm run dev
 | Weak-key injection into lesson content (PRD 13) | done |
 | Adaptive difficulty: enemy timing from demonstrated pace, timer-was-wrong easing (PRD 13) | done |
 | Stages 3-5: upper row, lower row, common words (14 new lessons) | done |
-| Stages 6-10: capitals, punctuation, numbers, sentences, paragraphs | later phases |
+| Stages 6-10: capitals (opposite-hand Shift shown on the keyboard), punctuation, numbers, sentences, paragraph transmissions | done |
+| Stage 6+ middle band: tighter pacing for Intermediate+ (PRD 16) | done |
 
 ## Architecture rules
 

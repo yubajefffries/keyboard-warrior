@@ -109,7 +109,14 @@ export class AdaptiveSource implements TokenSource {
    * ever serving nothing.
    */
   tokensFor(kind: EnemyKind): string[] {
-    if (kind === 'crawler') return [this.drawWhere((t) => t.length <= 3)];
+    if (kind === 'crawler') {
+      // Very short targets. In sentence stages nothing is <= 3 characters,
+      // so fall back to the shortest tokens the pool has rather than handing
+      // a crawler a whole transmission.
+      const lengths = [...new Set(this.candidates.map((c) => c.token.length))].sort((a, b) => a - b);
+      const cutoff = Math.max(3, lengths[0] ?? 3);
+      return [this.drawWhere((t) => t.length <= cutoff)];
+    }
     if (kind === 'brute') {
       return [
         this.drawWhere((t) => t.length >= 5),

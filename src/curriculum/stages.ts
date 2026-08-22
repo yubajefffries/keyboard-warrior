@@ -1,9 +1,9 @@
 /**
- * Curriculum: Stages 1 and 2. PRD Sections 11, 12.
+ * Curriculum: all ten stages. PRD Sections 11, 12.
  *
  * Progression is intentional, never random text. Each lesson names the keys it
  * introduces, and its content is filtered to keys the profile has been taught.
- * Stages 3-10 arrive in later phases; the shape here is what they plug into.
+ * From finding the F and J bumps to typing full transmissions under fire.
  */
 
 import { LESSON_MIN_ACCURACY, STAGE_WPM_FLOOR } from '../profile/types';
@@ -48,6 +48,24 @@ const K_QP = [...K_WO, 'q', 'p']; // the full Stage 3 set
 const K_NM = [...K_QP, 'n', 'm'];
 const K_CV = [...K_NM, 'c', 'v'];
 const K_ALL = [...K_CV, 'b', 'x', 'z']; // the full letter set
+
+/*
+ * Stage 6+: shifted characters, punctuation, digits, and finally the space.
+ * Capitals are chords, not keys -- they are tracked per-character but never
+ * gate a stage (see mastery.ts). LEFT_CAPS take the right Shift and
+ * RIGHT_CAPS the left, which is why Stage 6 splits along the hands.
+ */
+const LEFT_CAPS = [...'QWERTASDFGZXCVB'];
+const RIGHT_CAPS = [...'YUIOPHJKLNM'];
+const ALL_CAPS = [...LEFT_CAPS, ...RIGHT_CAPS];
+const K_CAPS = [...K_ALL, ...ALL_CAPS];
+const K_P1 = [...K_CAPS, ',', '.'];
+const K_P2 = [...K_P1, "'", '"'];
+const K_PUNCT = [...K_P2, '?', '!', ':'];
+const K_D1 = [...K_PUNCT, '4', '5', '6', '7'];
+const K_D2 = [...K_D1, '3', '8', '2', '9'];
+const K_DIGITS = [...K_D2, '1', '0'];
+const K_SPACE = [...K_DIGITS, ' '];
 
 export const STAGES: Stage[] = [
   {
@@ -321,6 +339,198 @@ export const STAGES: Stage[] = [
       },
     ],
   },
+  {
+    number: 6,
+    title: 'Capitals',
+    lessons: [
+      {
+        id: '6-1',
+        title: 'Right Shift',
+        objective: 'A left-hand capital takes the RIGHT Shift. The other hand always carries it.',
+        introduces: LEFT_CAPS,
+        keys: [...K_ALL, ...LEFT_CAPS],
+        targetTokens: 26,
+        pool: [
+          'The', 'That', 'This', 'Stop', 'Dark', 'Fast', 'Gate', 'Water', 'Cave',
+          'Best', 'Red', 'Green', 'Take', 'Give', 'Salt', 'Every', 'Winter', 'Someone',
+        ],
+      },
+      {
+        id: '6-2',
+        title: 'Left Shift',
+        objective: 'A right-hand capital takes the LEFT Shift. Mirror of the last lesson.',
+        introduces: RIGHT_CAPS,
+        keys: K_CAPS,
+        targetTokens: 26,
+        pool: [
+          'Yes', 'You', 'Under', 'Ice', 'Open', 'Post', 'Hold', 'Jump', 'Keep',
+          'Lock', 'Note', 'Move', 'Iron', 'Old', 'Hunt', 'Maybe', 'Puzzle', 'Kansas',
+        ],
+      },
+      {
+        id: '6-3',
+        title: 'Proper names',
+        objective: 'Both Shifts, decided per word, without looking down.',
+        introduces: [],
+        keys: K_CAPS,
+        targetTokens: 28,
+        pool: [
+          'Jeff', 'Monday', 'Friday', 'June', 'March', 'Kansas', 'Idaho', 'London',
+          'Paris', 'Utah', 'Nevada', 'Oregon', 'August', 'Sunday', 'Dakota', 'Texas',
+        ],
+      },
+    ],
+  },
+  {
+    number: 7,
+    title: 'Punctuation',
+    lessons: [
+      {
+        id: '7-1',
+        title: 'Period and comma',
+        objective: 'Right ring and middle reach down. Sentences get their endings.',
+        introduces: [',', '.'],
+        keys: K_P1,
+        targetTokens: 28,
+        pool: [
+          'end.', 'yes,', 'no,', 'stop.', 'wait,', 'done.', 'one,', 'two.', 'okay.',
+          'fine,', 'later.', 'first,', 'last.', 'Note.', 'Now,', 'Here.',
+        ],
+      },
+      {
+        id: '7-2',
+        title: 'Apostrophe and quotes',
+        objective: 'Right little finger, home row. The quote is the same key, shifted.',
+        introduces: ["'", '"'],
+        keys: K_P2,
+        targetTokens: 28,
+        pool: [
+          "don't", "it's", "can't", "won't", "isn't", "I'm", "they're", "we're",
+          '"go"', '"run"', '"stay"', '"hello"', "you're", "didn't", "That's", "wasn't",
+        ],
+      },
+      {
+        id: '7-3',
+        title: 'Question, exclamation, colon',
+        objective: 'All three are shifted keys you already know.',
+        introduces: ['?', '!', ':'],
+        keys: K_PUNCT,
+        targetTokens: 28,
+        pool: [
+          'why?', 'how?', 'now!', 'run!', 'no!', 'wait!', 'note:', 'time:', 'who?',
+          'really?', 'listen!', 'warning:', 'What?', 'Go!', 'Where?', 'Danger:',
+        ],
+      },
+    ],
+  },
+  {
+    number: 8,
+    title: 'Numbers',
+    lessons: [
+      {
+        id: '8-1',
+        title: '4 5 6 7',
+        objective: 'Index fingers reach for the number row first. Eyes stay on the text.',
+        introduces: ['4', '5', '6', '7'],
+        keys: K_D1,
+        targetTokens: 26,
+        pool: ['f4f', 'j7j', '45', '67', '474', '567', '4567', '7654', '44', '77', '56', '65', '4747', '5665'],
+      },
+      {
+        id: '8-2',
+        title: '3 8 2 9',
+        objective: 'Middle and ring fingers up. The stretch is longer than it feels.',
+        introduces: ['3', '8', '2', '9'],
+        keys: K_D2,
+        targetTokens: 26,
+        pool: ['d3d', 'k8k', 's2s', 'l9l', '38', '29', '2938', '3829', '223', '889', '392', '823', '2389', '9832'],
+      },
+      {
+        id: '8-3',
+        title: '1, 0, and years',
+        objective: 'Little fingers take the corners. Competence under pressure, not blind speed.',
+        introduces: ['1', '0'],
+        keys: K_DIGITS,
+        targetTokens: 26,
+        pool: ['a1a', ';0;', '10', '100', '2026', '1999', '1010', '8675', '404', '1024', '7000', '365', '2001', '90210'],
+      },
+    ],
+  },
+  {
+    number: 9,
+    title: 'Sentences',
+    lessons: [
+      {
+        id: '9-1',
+        title: 'Short sentences',
+        objective: 'The space bar joins. A thumb press between every word, without breaking rhythm.',
+        introduces: [' '],
+        keys: K_SPACE,
+        targetTokens: 16,
+        pool: [
+          'The lab is dark.', 'They are close.', 'Hold the line.', 'Run to the door.',
+          'It is quiet now.', 'Do not look back.', 'The lights are out.', 'Stay with me.',
+          'We move at dawn.', 'Keep your hands up.',
+        ],
+      },
+      {
+        id: '9-2',
+        title: 'Longer sentences',
+        objective: 'Whole thoughts under pressure. Accuracy first, always.',
+        introduces: [],
+        keys: K_SPACE,
+        targetTokens: 12,
+        pool: [
+          'Something is moving in the fog.', 'The door will not hold for long.',
+          'Type like your life depends on it.', 'Nobody has heard from the lab.',
+          'The generator hums behind the wall.', 'Her name was on the last report.',
+          "Don't stop until the room is clear.", 'Is anyone still out there?',
+        ],
+      },
+    ],
+  },
+  {
+    number: 10,
+    title: 'Paragraphs',
+    lessons: [
+      {
+        id: '10-1',
+        title: 'Transmissions',
+        objective: 'Long messages, typed clean, while they close the distance.',
+        introduces: [],
+        keys: K_SPACE,
+        targetTokens: 8,
+        pool: [
+          'We found the source of the signal. It was never human.',
+          'Do not open the inner door. Nothing in here is asleep.',
+          'If you can read this, the vaccine failed. Run.',
+          'The last team went quiet after the second floor.',
+          'Power is failing. The dark is full of small sounds.',
+          'Leave the samples. Take the notes. Seal everything.',
+          'Something answered the radio check. We never broadcast.',
+          'The cold room is warm. I do not want to know why.',
+        ],
+      },
+      {
+        id: '10-2',
+        title: 'The last door',
+        objective: 'Everything the game ever taught, in one long breath.',
+        introduces: [],
+        keys: K_SPACE,
+        targetTokens: 8,
+        pool: [
+          'Access code 4471 accepted. Door seals in 10 seconds.',
+          'Specimen 8 is awake. Repeat: Specimen 8 is awake.',
+          'Level 3 lockdown begins now. Luck to whoever reads this.',
+          "Don't stop typing. It can hear the silence.",
+          'Protocol 9: burn everything. Sign it with your name.',
+          'This is the last door. After this, the morning.',
+          'Whoever taught you to type like that saved your life.',
+          'Clearance granted. Welcome back to the surface, survivor.',
+        ],
+      },
+    ],
+  },
 ];
 
 export function stage(number: number): Stage | null {
@@ -344,10 +554,12 @@ export const STAGE_KEYS: Record<number, string[]> = {
   3: ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', 'g', 'h'],
   4: ['z', 'x', 'c', 'v', 'b', 'n', 'm'],
   5: [], // common words, no new keys
-  6: [], // capitalisation: Shift, not new letters
-  7: [',', '.', '?', '!', "'", '"', ':'],
-  8: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
-  9: [],
+  // Capitals are chords: taught and tracked per character, never gate-blocking
+  // (mastery.ts waives shifted characters from every gate).
+  6: ALL_CAPS,
+  7: [',', '.', "'", '"', '?', '!', ':'],
+  8: ['4', '5', '6', '7', '3', '8', '2', '9', '1', '0'],
+  9: [' '],
   10: [],
 };
 

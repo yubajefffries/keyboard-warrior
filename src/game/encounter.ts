@@ -711,7 +711,7 @@ export class Encounter {
     const worst = this.worstKey();
     this.cb.onDeath?.(
       worst
-        ? `${worst.key.toUpperCase()} was ${Math.round(worst.accuracy * 100)}% this attempt.`
+        ? `${worst.key === ' ' ? 'SPACE' : worst.key.toUpperCase()} was ${Math.round(worst.accuracy * 100)}% this attempt.`
         : 'They were just too close. Try again.',
     );
   }

@@ -163,6 +163,18 @@ describe('enemy-sized tokens (PRD 14)', () => {
   });
 });
 
+describe('crawlers in sentence stages', () => {
+  it('gets the shortest sentences, never a transmission', () => {
+    const stage10 = STAGES.find((s) => s.number === 10)!.lessons[0];
+    const source = new AdaptiveSource(stage10, plan({ passthrough: true }), 3);
+    const shortest = Math.min(...stage10.pool.map((t) => t.length));
+    for (let i = 0; i < 20; i++) {
+      const [token] = source.tokensFor('crawler');
+      expect(token.length).toBe(shortest);
+    }
+  });
+});
+
 describe('what the player is told', () => {
   it('says nothing when nothing has slipped', () => {
     const p = createProfile('T');

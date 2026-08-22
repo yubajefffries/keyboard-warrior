@@ -12,13 +12,19 @@
  */
 
 import { FINGER_LABEL, FINGER_OF } from '../profile/mastery';
+import { baseKeyOf, properShiftSide } from '../content/shift';
 
 /** US QWERTY, the only layout the PRD supports. Progress heatmap uses it too. */
 export const KEYBOARD_ROWS: string[][] = [
+  ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
   ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
-  ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';'],
+  ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', "'"],
   ['z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/'],
 ];
+
+/** Internal cell ids for the two Shift keys; never real characters. */
+const LSHIFT = '<LS>';
+const RSHIFT = '<RS>';
 
 const FINGER_COLORS: Record<string, string> = {
   'left-pinky': '#c2679a',
@@ -47,9 +53,13 @@ export class KeyboardViz {
   private build(): void {
     this.root.innerHTML = '';
     this.root.classList.add('kbviz');
-    for (const row of KEYBOARD_ROWS) {
+    KEYBOARD_ROWS.forEach((row, rowIndex) => {
       const rowEl = document.createElement('div');
       rowEl.className = 'kbrow';
+      // The bottom letter row carries the Shift keys, so opposite-hand Shift
+      // can be visually demonstrated (PRD 11) rather than described.
+      const isBottom = rowIndex === KEYBOARD_ROWS.length - 1;
+      if (isBottom) rowEl.appendChild(this.shiftCell(LSHIFT, 'left-pinky'));
       for (const key of row) {
         const cell = document.createElement('div');
         cell.className = 'kbkey';
@@ -62,8 +72,9 @@ export class KeyboardViz {
         this.cells.set(key, cell);
         rowEl.appendChild(cell);
       }
+      if (isBottom) rowEl.appendChild(this.shiftCell(RSHIFT, 'right-pinky'));
       this.root.appendChild(rowEl);
-    }
+    });
     const spaceRow = document.createElement('div');
     spaceRow.className = 'kbrow';
     const space = document.createElement('div');
@@ -73,6 +84,21 @@ export class KeyboardViz {
     this.cells.set(' ', space);
     spaceRow.appendChild(space);
     this.root.appendChild(spaceRow);
+  }
+
+  private shiftCell(id: string, finger: string): HTMLElement {
+    const cell = document.createElement('div');
+    cell.className = 'kbkey kbshift';
+    cell.textContent = String.fromCharCode(0x21e7);
+    cell.style.setProperty('--finger', FINGER_COLORS[finger]);
+    this.cells.set(id, cell);
+    return cell;
+  }
+
+  private shiftCellFor(ch: string): HTMLElement | null {
+    const side = properShiftSide(ch, FINGER_OF);
+    if (!side) return null;
+    return this.cells.get(side === 'left' ? LSHIFT : RSHIFT) ?? null;
   }
 
   setVisible(on: boolean): void {
@@ -92,21 +118,33 @@ export class KeyboardViz {
     return this.visible;
   }
 
-  /** The key the player must press now, and the one after it. */
+  /**
+   * The key the player must press now, and the one after it. A shifted
+   * character lights its base key AND the opposite-hand Shift: the chord is
+   * shown, not described.
+   */
   setTarget(key: string | null, next: string | null = null): void {
     if (key === this.target && next === this.upcoming) return;
-    if (this.target) this.cells.get(this.target)?.classList.remove('target');
-    if (this.upcoming) this.cells.get(this.upcoming)?.classList.remove('next');
+    if (this.target) {
+      this.cells.get(baseKeyOf(this.target))?.classList.remove('target');
+      this.shiftCellFor(this.target)?.classList.remove('target');
+    }
+    if (this.upcoming) this.cells.get(baseKeyOf(this.upcoming))?.classList.remove('next');
     this.target = key;
     this.upcoming = next;
-    if (key) this.cells.get(key)?.classList.add('target');
+    if (key) {
+      this.cells.get(baseKeyOf(key))?.classList.add('target');
+      this.shiftCellFor(key)?.classList.add('target');
+    }
     // Never mark the same cell as both: the current key wins.
-    if (next && next !== key) this.cells.get(next)?.classList.add('next');
+    if (next && next !== key && (!key || baseKeyOf(next) !== baseKeyOf(key))) {
+      this.cells.get(baseKeyOf(next))?.classList.add('next');
+    }
   }
 
   /** Keypress animation. Purely cosmetic, cheap enough to run at 200 WPM. */
   flash(key: string, kind: 'hit' | 'miss'): void {
-    const cell = this.cells.get(key);
+    const cell = this.cells.get(baseKeyOf(key));
     if (!cell) return;
     const cls = kind === 'hit' ? 'hit' : 'miss';
     cell.classList.remove(cls);
@@ -149,9 +187,13 @@ export class FingerHint {
   show(key: string, durationMs = 1800): void {
     const finger = FINGER_OF[key];
     if (!finger) return;
+    // For a shifted character, name the chord: which finger, plus which hand
+    // carries the Shift. Opposite-hand Shift, said out loud (PRD 11).
+    const side = properShiftSide(key, FINGER_OF);
+    const label = (FINGER_LABEL[finger] ?? finger) + (side ? ` + ${side} Shift` : '');
     this.el.innerHTML =
-      `<b>${key === ' ' ? 'space' : key.toUpperCase()}</b>` +
-      `<span>${FINGER_LABEL[finger] ?? finger}</span>`;
+      `<b>${key === ' ' ? 'space' : key}</b>` +
+      `<span>${label}</span>`;
     this.el.style.setProperty('--finger', FINGER_COLORS[finger] ?? '#7f858c');
     this.el.classList.add('on');
     if (this.timer !== null) clearTimeout(this.timer);
