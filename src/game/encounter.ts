@@ -29,6 +29,13 @@ import { StatsTracker } from '../stats/keystats';
 import type { WeaponAudio } from '../audio/sfx';
 import { Scorer, type EnemyKind, type ScoreBreakdown } from './scoring';
 import { buildLaboratory } from './environment';
+import {
+  HEARTBEAT_AT,
+  HEARTBEAT_URGENT_AT,
+  MAX_HEALTH,
+  MISS_DRAIN,
+  threatDrainPerS,
+} from '../modes/survival';
 import type { PromptView } from '../ui/prompt';
 import type { KeyboardViz } from '../ui/keyboard';
 import { RobotTypist, judgeBurst, type RobotReport } from '../dev/robot';
@@ -58,6 +65,8 @@ export interface EffectSettings {
 
 export interface EncounterCallbacks {
   onDeath?: (diagnosis: string) => void;
+  /** An enemy died. Survival counts these against the wave quota. */
+  onKill?: (kind: EnemyKind) => void;
   /**
    * The same key has been missed several times running. The app decides
    * whether to surface a finger hint, since only it knows whether the
@@ -113,9 +122,10 @@ interface EnemyT {
 
 /** Per-kind movement relative to the pacing walk time. PRD 14. [REVIEW] */
 const KIND_SPEED: Record<EnemyKind, number> = { standard: 1, crawler: 1.7, brute: 0.6 };
-/** Spawn odds once variety is on (Stage 3+). At most one brute at a time. [REVIEW] */
-const CRAWLER_CHANCE = 0.18;
-const BRUTE_CHANCE = 0.1;
+/** Learn-mode spawn odds once variety is on (Stage 3+); survival overrides
+ *  per wave via setMix. At most one brute at a time either way. [REVIEW] */
+const DEFAULT_CRAWLER_CHANCE = 0.18;
+const DEFAULT_BRUTE_CHANCE = 0.1;
 
 /** Matches the old hardcoded feel, for callers that pass no pacing. */
 const DEFAULT_PACING: EncounterPacing = { spawnIntervalS: 5.5, walkTimeS: 50 };
@@ -153,6 +163,12 @@ export class Encounter {
   private weapon: WeaponKind = 'shotgun';
   private variety = false;
   private showCombo = false;
+  private mode: 'learn' | 'survival' = 'learn';
+  private health = MAX_HEALTH;
+  private heartbeatIn = 0;
+  private waveNo = 0;
+  private crawlerChance = DEFAULT_CRAWLER_CHANCE;
+  private bruteChance = DEFAULT_BRUTE_CHANCE;
   private scorer = new Scorer();
   private shotsFired = 0;
   private typing: TypingEngine;
@@ -287,6 +303,8 @@ export class Encounter {
         deps.audio.dryFire();
         this.missCount += 1;
         this.scorer.miss();
+        // Survival's full error stack (PRD 5): a small drain, exactly once.
+        if (this.mode === 'survival') this.health = Math.max(0, this.health - MISS_DRAIN);
         this.bump(expected, false);
         this.deps.prompt.flashError(performance.now());
         this.deps.keyboard?.flash(pressed, 'miss');
@@ -313,6 +331,7 @@ export class Encounter {
             this.scorer.elimination(target.kind);
             target.alive = false;
             target.mesh.dispose();
+            this.cb.onKill?.(target.kind);
           } else {
             this.fireWeapon(false);
             this.deps.audio.bruteHit();
@@ -376,13 +395,21 @@ export class Encounter {
       variety?: boolean;
       /** Whether score and combo appear on the HUD. PRD 17 visibility. */
       showCombo?: boolean;
+      /** Survival: health drains, misses cost, death ends the run. PRD 16. */
+      mode?: 'learn' | 'survival';
     } = {},
   ): void {
+    this.mode = opts.mode ?? 'learn';
+    this.health = MAX_HEALTH;
+    this.heartbeatIn = 0;
+    this.waveNo = this.mode === 'survival' ? 1 : 0;
     this.spawnEnemies = opts.spawnEnemies ?? true;
     if (opts.pacing) this.pacing = opts.pacing;
     this.setWeapon(opts.weapon ?? 'shotgun');
     this.variety = opts.variety ?? false;
     this.showCombo = opts.showCombo ?? false;
+    this.crawlerChance = DEFAULT_CRAWLER_CHANCE;
+    this.bruteChance = DEFAULT_BRUTE_CHANCE;
     this.provider = provider;
     this.tracker = new StatsTracker();
     this.typing.setStats(this.tracker);
@@ -448,6 +475,34 @@ export class Encounter {
    */
   setPacing(pacing: EncounterPacing): void {
     this.pacing = pacing;
+  }
+
+  /** Wave control: stop feeding the room so the current wave can be cleared. */
+  setSpawningEnabled(on: boolean): void {
+    this.spawnEnemies = on;
+  }
+
+  /** Enemy mix for the current wave (PRD 18: mixed-mechanic waves). */
+  setMix(mix: { crawlerChance: number; bruteChance: number }): void {
+    this.crawlerChance = mix.crawlerChance;
+    this.bruteChance = mix.bruteChance;
+  }
+
+  setWaveNumber(wave: number): void {
+    this.waveNo = wave;
+  }
+
+  get aliveCount(): number {
+    return this.enemies.filter((e) => e.alive).length;
+  }
+
+  get healthValue(): number {
+    return this.health;
+  }
+
+  /** Wave-clear breather. Health is earned back, never reset. */
+  healBy(amount: number): void {
+    this.health = Math.min(MAX_HEALTH, this.health + amount);
   }
 
   /** Intensity and motion, from the profile's settings. Applies immediately. */
@@ -593,7 +648,16 @@ export class Encounter {
     if (!best) {
       this.spawn();
       best = this.enemies.find((e) => e.alive) ?? null;
-      if (!best) return; // spawn cap edge; the frame loop will retry
+      if (!best) {
+        // Field empty and spawning paused (a wave boundary): nothing to type,
+        // and the prompt must say so rather than pointing at a ghost.
+        this.active = null;
+        this.typing.setToken('');
+        this.deps.prompt.render('', 0);
+        this.deps.prompt.setUpcoming([]);
+        this.deps.keyboard?.setTarget(null);
+        return;
+      }
     }
 
     // World highlight moves with the engagement, not per frame.
@@ -693,8 +757,8 @@ export class Encounter {
     if (!this.variety) return 'standard';
     const r = Math.random();
     const bruteAlive = this.enemies.some((e) => e.alive && e.kind === 'brute');
-    if (!bruteAlive && r < BRUTE_CHANCE) return 'brute';
-    if (r < BRUTE_CHANCE + CRAWLER_CHANCE) return 'crawler';
+    if (!bruteAlive && r < this.bruteChance) return 'brute';
+    if (r < this.bruteChance + this.crawlerChance) return 'crawler';
     return 'standard';
   }
 
@@ -704,15 +768,16 @@ export class Encounter {
     this.active = null;
   }
 
-  private die(): void {
+  private die(reason?: string): void {
     this.state = 'dead';
     if (this.robot.running) this.robot.stop();
     this.typing.setEnabled(false);
     const worst = this.worstKey();
     this.cb.onDeath?.(
-      worst
-        ? `${worst.key === ' ' ? 'SPACE' : worst.key.toUpperCase()} was ${Math.round(worst.accuracy * 100)}% this attempt.`
-        : 'They were just too close. Try again.',
+      reason ??
+        (worst
+          ? `${worst.key === ' ' ? 'SPACE' : worst.key.toUpperCase()} was ${Math.round(worst.accuracy * 100)}% this attempt.`
+          : 'They were just too close. Try again.'),
     );
   }
 
@@ -755,11 +820,38 @@ export class Encounter {
       // active enemy somehow died without completing (cleared externally),
       // recover here rather than leaving a prompt pointing at a ghost.
       if (!this.active || !this.active.alive) this.engageNearest();
+
+      // Survival health: time under threat, scaled by how close the nearest
+      // enemy is. An empty room costs nothing; a face full of infected does.
+      if (this.mode === 'survival') {
+        let nearest = -Infinity;
+        for (const e of this.enemies) if (e.alive && e.mesh.position.z > nearest) nearest = e.mesh.position.z;
+        if (nearest > -Infinity) {
+          const closeness = (nearest + 38) / (38 + KILL_LINE_Z);
+          this.health = Math.max(0, this.health - threatDrainPerS(closeness) * dt);
+        }
+        if (this.health <= 0) {
+          this.die('You were overwhelmed. The room was never empty long enough.');
+          return;
+        }
+        // The warning that builds (PRD 16): a low heartbeat, faster as it gets bad.
+        if (this.health < HEARTBEAT_AT) {
+          this.heartbeatIn -= dt;
+          if (this.heartbeatIn <= 0) {
+            this.deps.audio.heartbeat();
+            this.heartbeatIn = this.health < HEARTBEAT_URGENT_AT ? 0.55 : 0.9;
+          }
+        }
+      }
     }
 
     const p = this.progress;
     const combo = this.scorer.combo;
+    const hp = Math.ceil(this.health);
     const line =
+      (this.mode === 'survival'
+        ? `<span class="${hp < HEARTBEAT_AT ? 'hplow' : 'hp'}">HP ${hp}</span> &nbsp; WAVE ${this.waveNo} &nbsp; `
+        : '') +
       `WPM ${Math.round(p.wpm)} &nbsp; ACC ${Math.round(p.accuracy * 100)}% &nbsp; ` +
       `FPS ${Math.round(this.engine3d.getFps())}` +
       (this.showCombo

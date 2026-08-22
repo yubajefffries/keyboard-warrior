@@ -160,6 +160,23 @@
       background: rgba(10,10,12,0.6); padding: 8px 14px; border-radius: 8px; line-height: 1.6;
     }
     #hud .combo { color: var(--accent); font-weight: 700; }
+    #hud .hp { color: #8fdca2; font-weight: 700; }
+    #hud .hplow { color: var(--error); font-weight: 700; }
+
+    /* Wave banner: announces, then gets out of the way. Never blocks input. */
+    #waveBanner {
+      position: fixed; left: 50%; top: 30%; transform: translateX(-50%);
+      z-index: 15; pointer-events: none; opacity: 0;
+      font-family: var(--ui); font-size: 54px; font-weight: 800; letter-spacing: 0.22em;
+      color: var(--ink); text-shadow: 0 2px 18px rgba(0,0,0,0.9);
+    }
+    #waveBanner.show { animation: wavein 2.2s ease-out; }
+    @keyframes wavein {
+      0% { opacity: 0; transform: translateX(-50%) translateY(10px); }
+      12% { opacity: 1; transform: translateX(-50%) translateY(0); }
+      75% { opacity: 1; }
+      100% { opacity: 0; }
+    }
     /* Combo tier-up: one readable pulse. Never touches the prompt layer. */
     #hud.tierup { animation: tierup 420ms ease-out; }
     @keyframes tierup {
@@ -348,6 +365,7 @@
   <div id="clock"></div>
   <div id="warnings"></div>
   <div id="robotPanel"></div>
+  <div id="waveBanner"></div>
 
   <div id="screen"></div>
 

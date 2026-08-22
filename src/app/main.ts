@@ -39,6 +39,12 @@ import { AdaptiveSource, planFor, practiceNote } from '../curriculum/adaptive';
 import { easingFrom, pacingFor } from '../game/pacing';
 import { newFatigueState, recordToken } from '../game/fatigue';
 import { comboVisible } from '../game/scoring';
+import {
+  SurvivalSource,
+  WAVE_HEAL,
+  isNewBest,
+  wavePlan,
+} from '../modes/survival';
 import { TAUGHT_KEYS } from '../content/sequences';
 import { weakKeys } from '../profile/mastery';
 import { WordSource, wordsFor } from '../modes/speedtest';
@@ -392,7 +398,14 @@ function showMenu(): void {
           Learn to type<span class="sub">${learnLabel}</span>
         </button>
         <button id="playSpeed" class="ghost">
-          Speed test<span class="sub">30 or 60 seconds, no enemies</span>
+          Speed test<span class="sub">15 seconds to 2 minutes, no enemies</span>
+        </button>
+        <button id="playSurvival" class="ghost" ${survivalUnlocked(profile) ? '' : 'disabled'}>
+          Survival<span class="sub">${survivalUnlocked(profile)
+            ? profile.survivalBest
+              ? `Best: wave ${profile.survivalBest.wave}, ${profile.survivalBest.score.toLocaleString()} points`
+              : 'Waves without end. How far can you get?'
+            : 'Clear Stage 5 to unlock: it takes the whole alphabet'}</span>
         </button>
         <button id="playProgress" class="ghost">
           Progress<span class="sub">Every key, every session, and your export</span>
@@ -409,6 +422,7 @@ function showMenu(): void {
 
   on('playLearn', startLesson);
   on('playSpeed', showSpeedSetup);
+  on('playSurvival', showSurvivalIntro);
   on('playProgress', showProgress);
   on('playSettings', () => showSettings(showMenu));
   on('switchProfile', showProfiles);
@@ -730,6 +744,11 @@ function showPause(reason: string): void {
   on('resumeBtn', doResume);
   on('pauseSettings', () => showSettings(() => showPause(reason)));
   on('quitLesson', () => {
+    if (run) {
+      // Walking away is an ending too: the run is recorded, not vanished.
+      endSurvival('You walked away. The record keeps what you cleared.');
+      return;
+    }
     encounter.stop();
     showMenu();
   });
@@ -741,6 +760,158 @@ function doResume(): void {
   hideScreen();
   setChrome({ prompt: true, hud: true, keyboard: true });
   encounter.resume();
+}
+
+// ---------- Survival (PRD 16, 18) ----------
+/**
+ * Unlocked by clearing Stage 5 (the whole alphabet) or by placing Advanced.
+ * PRD 3.3 gives Advanced "Survival when the mode exists"; everyone else earns
+ * it through the curriculum. Learn is never removed either way.
+ */
+function survivalUnlocked(p: Profile): boolean {
+  return p.stagesCleared.includes(5) || p.route === 'advanced';
+}
+
+/** Live state of the current run. Null when no run is active. */
+let run: { wave: number; kills: number; killsThisWave: number; source: SurvivalSource } | null = null;
+
+function showSurvivalIntro(): void {
+  if (!profile || !survivalUnlocked(profile)) return;
+  setChrome({});
+  const best = profile.survivalBest;
+  showScreen(`
+    <div class="sheet narrow">
+      <h1>Survival</h1>
+      <p class="lead">Waves without end. Each one is a bigger crowd with harder words,
+         never a faster clock than you have already proven you can beat.</p>
+      <p>Health drains while they are close, and a little on every miss. Clearing a wave
+         buys some back. When it reaches zero, or one of them reaches you, the run ends.</p>
+      ${best ? `<p class="sub">Best run: wave ${best.wave} &middot; ${best.kills} kills &middot; ${best.score.toLocaleString()} points</p>` : ''}
+      <div class="rowbtns">
+        <button id="startSurvival">Start the run</button>
+        <button id="survivalBack" class="ghost">Back</button>
+      </div>
+    </div>`);
+  on('startSurvival', runSurvival);
+  on('survivalBack', showMenu);
+}
+
+function runSurvival(): void {
+  if (!profile) return;
+  audio.ensureStarted();
+  hideScreen();
+  setChrome({ prompt: true, hud: true, keyboard: true });
+
+  const source = new SurvivalSource(keysTaughtThrough(profile.stage), Date.now() & 0xffff);
+  run = { wave: 1, kills: 0, killsThisWave: 0, source };
+  const plan = wavePlan(profile, 1, source.meanTokenChars);
+  console.debug('[survival]', plan);
+
+  encounter.on({
+    onKill: () => {
+      if (!run) return;
+      run.kills += 1;
+      run.killsThisWave += 1;
+      if (run.killsThisWave >= wavePlan(profile!, run.wave, run.source.meanTokenChars).quota) {
+        // Quota met: stop feeding the room. The wave ends when it is empty.
+        encounter.setSpawningEnabled(false);
+      }
+    },
+    onTokenComplete: () => {
+      // Wave boundary check rides the same beat as everything else: after a
+      // kill that emptied a closed room, advance.
+      if (run && encounter.aliveCount === 0 && run.killsThisWave >= wavePlan(profile!, run.wave, run.source.meanTokenChars).quota) {
+        nextWave();
+      }
+    },
+    onDeath: (reason) => endSurvival(reason),
+    onPause: (r) => showPause(r),
+    onStruggle: (key) => {
+      if (!keyboard.shown && profile?.settings.fingerGuide !== 'off') fingerHint.show(key);
+    },
+    onBurstReport: (html) => {
+      robotPanel.style.display = 'block';
+      robotPanel.innerHTML = html;
+    },
+  });
+
+  encounter.start(run.source, {
+    pacing: { spawnIntervalS: plan.spawnIntervalS, walkTimeS: plan.walkTimeS },
+    weapon: profile.stage >= 3 ? 'revolver' : 'shotgun',
+    variety: true,
+    showCombo: true, // PRD 17: always visible in Survival
+    mode: 'survival',
+  });
+  encounter.setMix({ crawlerChance: plan.crawlerChance, bruteChance: plan.bruteChance });
+  showWaveBanner(1);
+}
+
+function nextWave(): void {
+  if (!profile || !run) return;
+  run.wave += 1;
+  run.killsThisWave = 0;
+  run.source.setWave(run.wave);
+  const plan = wavePlan(profile, run.wave, run.source.meanTokenChars);
+  console.debug('[survival]', plan);
+  encounter.setPacing({ spawnIntervalS: plan.spawnIntervalS, walkTimeS: plan.walkTimeS });
+  encounter.setMix({ crawlerChance: plan.crawlerChance, bruteChance: plan.bruteChance });
+  encounter.setWaveNumber(run.wave);
+  encounter.healBy(WAVE_HEAL);
+  encounter.setSpawningEnabled(true);
+  showWaveBanner(run.wave);
+}
+
+const waveBanner = document.getElementById('waveBanner')!;
+function showWaveBanner(wave: number): void {
+  waveBanner.textContent = `WAVE ${wave}`;
+  waveBanner.classList.remove('show');
+  void waveBanner.offsetWidth;
+  waveBanner.classList.add('show');
+}
+
+function endSurvival(reason: string): void {
+  if (!profile || !run) return;
+  const p = encounter.progress;
+  const score = encounter.finalizeScore(p.accuracy, p.wpm);
+  const result = { wave: run.wave, kills: run.kills, score: score.total, at: new Date().toISOString() };
+  const newBest = isNewBest(profile.survivalBest, result);
+  if (newBest) profile.survivalBest = result;
+
+  // A survival run is real typing under the realest pressure the game has:
+  // it feeds mastery like any combat does.
+  const session = recordActivity(profile, {
+    correctChars: p.correctChars,
+    activeMs: p.activeMs,
+    accuracy: p.accuracy,
+  });
+  absorbSamples(profile, encounter.stats.samplesIn('combat'), { sessionId: session.startedAt });
+  save();
+
+  const finishedRun = run;
+  run = null;
+  encounter.stop();
+  setChrome({});
+  showScreen(`
+    <div class="sheet narrow">
+      <h1>THE RUN ENDS</h1>
+      <p class="lead">${escapeHtml(reason)}</p>
+      ${newBest ? '<div class="verdict-big pass">NEW BEST</div>' : ''}
+      <div class="result-lines">
+        <div class="rl"><span>Waves</span><b>${finishedRun.wave}</b></div>
+        <div class="rl"><span>Kills</span><b>${finishedRun.kills}</b></div>
+        <div class="rl"><span>Accuracy</span><b>${Math.round(p.accuracy * 100)}%</b></div>
+        <div class="rl"><span>Speed</span><b>${Math.round(p.wpm)} WPM</b></div>
+        <div class="rl"><span>Best streak</span><b>${encounter.bestStreak}</b></div>
+        <div class="rl"><span><b>Score</b></span><b>${score.total.toLocaleString()}</b></div>
+      </div>
+      ${profile.survivalBest && !newBest ? `<p class="note" style="text-align:center;margin-top:12px">Best remains wave ${profile.survivalBest.wave}, ${profile.survivalBest.score.toLocaleString()} points.</p>` : ''}
+      <div class="rowbtns">
+        <button id="againSurvival">Run it again</button>
+        <button id="survivalMenu" class="ghost">Back to menu</button>
+      </div>
+    </div>`);
+  on('againSurvival', runSurvival);
+  on('survivalMenu', showMenu);
 }
 
 // ---------- Speed Test (PRD 18) ----------

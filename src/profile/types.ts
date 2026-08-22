@@ -203,6 +203,8 @@ export interface Profile {
   sessions: SessionSummary[];
   speedTests: SpeedTestResult[];
   placement: PlacementResult | null;
+  /** Best survival run. PRD 21: survival records live on the profile. */
+  survivalBest: { wave: number; kills: number; score: number; at: string } | null;
 }
 
 export function emptyKeyTable(): Record<StatContext, Record<string, KeyAggregate>> {

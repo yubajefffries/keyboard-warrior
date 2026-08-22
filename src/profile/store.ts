@@ -75,6 +75,7 @@ export function createProfile(name: string, route: Route = 'beginner'): Profile 
     sessions: [],
     speedTests: [],
     placement: null,
+    survivalBest: null,
   };
 }
 

@@ -4,7 +4,7 @@ Type like your life depends on it. A first-person action typing game and touch-t
 
 **Play it:** [keyboard-warrior-nine.vercel.app](https://keyboard-warrior-nine.vercel.app) or [yubajefffries.github.io/keyboard-warrior](https://yubajefffries.github.io/keyboard-warrior/). Profiles live in your browser's localStorage; the Progress screen's export button is your save file.
 
-**Status: the full ten-stage curriculum is live.** From finding the F and J bumps to typing transmissions under fire: capitals with opposite-hand Shift visually demonstrated, punctuation, the number row, sentences, and paragraph bosses. Remaining Phase 2 scope: Survival mode, Practice mode, 5m speed test, more weapons and enemies. See `docs/PRD_v0_4.md` for the full product spec.
+**Status: the full ten-stage curriculum and Survival mode are live.** From finding the F and J bumps to typing transmissions under fire: capitals with opposite-hand Shift visually demonstrated, punctuation, the number row, sentences, and paragraph bosses. Remaining Phase 2 scope: Practice mode, 5m speed test, more weapons and enemies (Screamer next). See `docs/PRD_v0_4.md` for the full product spec.
 
 ## Run it
 
@@ -47,6 +47,7 @@ npm run dev
 | Stages 3-5: upper row, lower row, common words (14 new lessons) | done |
 | Stages 6-10: capitals (opposite-hand Shift shown on the keyboard), punctuation, numbers, sentences, paragraph transmissions | done |
 | Stage 6+ middle band: tighter pacing for Intermediate+ (PRD 16) | done |
+| Survival: waves, complexity-not-speed scaling, health, records (PRD 16/18) | done |
 
 ## Architecture rules
 

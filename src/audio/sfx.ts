@@ -160,6 +160,12 @@ export class WeaponAudio {
     }
   }
 
+  /** Low double thump: the warning that builds as health falls (PRD 16). */
+  heartbeat(): void {
+    this.playTone({ freq: 55, endFreq: 40, duration: 0.1, gain: 0.5, type: 'sine' });
+    this.playTone({ freq: 50, endFreq: 38, duration: 0.09, gain: 0.35, type: 'sine', delay: 0.16 });
+  }
+
   /** Meaty thud for a brute taking a hit without dying. */
   bruteHit(): void {
     this.playNoise({ duration: 0.14, gain: 0.6, filterType: 'lowpass', freq: 300, decay: 0.12, delay: 0.02 });

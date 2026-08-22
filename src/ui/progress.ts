@@ -41,6 +41,7 @@ export function renderProgress(profile: Profile): string {
         ${card('Best speed test', best ? `${Math.round(best.wpm)} WPM` : '&mdash;', best ? `${Math.round(best.accuracy * 100)}% accuracy over ${best.durationS}s` : 'No speed test yet')}
         ${card('Recent accuracy', recent.length ? `${Math.round(avg(recent.map((s) => s.accuracy)) * 100)}%` : '&mdash;', `Across the last ${recent.length} session${recent.length === 1 ? '' : 's'}`)}
         ${card('Recent speed', recent.length ? `${Math.round(avg(recent.map((s) => s.wpm)))} WPM` : '&mdash;', 'In lessons, not tests')}
+        ${profile.survivalBest ? card('Survival best', `Wave ${profile.survivalBest.wave}`, `${profile.survivalBest.kills} kills &middot; ${profile.survivalBest.score.toLocaleString()} points`) : ''}
       </div>
 
       <h2>Over time</h2>

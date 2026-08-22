@@ -318,6 +318,14 @@ export function validateProfile(input: unknown): ProfileResult {
         consistency: Math.max(0, num(r.consistency)),
         peakWpm: Math.max(0, num(r.peakWpm)),
       })),
+    survivalBest: isPlainObject(input.survivalBest)
+      ? {
+          wave: Math.max(0, Math.floor(num(input.survivalBest.wave))),
+          kills: Math.max(0, Math.floor(num(input.survivalBest.kills))),
+          score: Math.max(0, Math.floor(num(input.survivalBest.score))),
+          at: typeof input.survivalBest.at === 'string' ? input.survivalBest.at : '',
+        }
+      : null,
     placement: isPlainObject(input.placement)
       ? {
           at: typeof input.placement.at === 'string' ? input.placement.at : '',
