@@ -137,4 +137,32 @@ export class WeaponAudio {
   tick(): void {
     this.playTone({ freq: 2200, duration: 0.03, gain: 0.07, type: 'sine' });
   }
+
+  /** Revolver: sharper, drier crack than the shotgun; one word, one shot. */
+  revolverFire(): void {
+    this.playNoise({ duration: 0.18, gain: 0.85, filterType: 'lowpass', freq: 1400, decay: 0.14 });
+    this.playNoise({ duration: 0.08, gain: 0.55, filterType: 'highpass', freq: 3200, decay: 0.06 });
+    this.playTone({ freq: 160, endFreq: 70, duration: 0.16, gain: 0.6, type: 'triangle' });
+  }
+
+  /** Cylinder ratchet after each shot: the revolver's pump-equivalent beat. */
+  cylinder(): void {
+    this.playNoise({ duration: 0.04, gain: 0.3, filterType: 'bandpass', freq: 2400, q: 5, decay: 0.035, delay: 0.12 });
+  }
+
+  /** Cylinder spin flourish every sixth shot. Cosmetic; Learn never blocks on a reload. */
+  reloadSpin(): void {
+    for (let i = 0; i < 6; i++) {
+      this.playNoise({
+        duration: 0.03, gain: 0.16, filterType: 'bandpass', freq: 2800, q: 6,
+        decay: 0.025, delay: 0.16 + i * 0.05,
+      });
+    }
+  }
+
+  /** Meaty thud for a brute taking a hit without dying. */
+  bruteHit(): void {
+    this.playNoise({ duration: 0.14, gain: 0.6, filterType: 'lowpass', freq: 300, decay: 0.12, delay: 0.02 });
+    this.playTone({ freq: 90, endFreq: 55, duration: 0.12, gain: 0.4, type: 'sine', delay: 0.02 });
+  }
 }

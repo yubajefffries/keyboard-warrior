@@ -15,6 +15,7 @@
  */
 
 import { mulberry32, pickFresh } from '../util/rand';
+import type { EnemyKind } from '../game/scoring';
 import type { TokenSource } from '../content/sequences';
 import { lowExposureKeys, weakKeys, keyState } from '../profile/mastery';
 import type { Profile } from '../profile/types';
@@ -100,8 +101,40 @@ export class AdaptiveSource implements TokenSource {
     return { served: this.served, weak: this.weakServed, lowExposure: this.lowServed };
   }
 
+  /**
+   * Tokens sized to the enemy that will carry them. PRD 14: crawlers take
+   * very short targets (recognition speed), brutes take several longer words
+   * (staying power). Weak-key and low-exposure logic still applies inside
+   * each slice; the length filter falls back to the whole pool rather than
+   * ever serving nothing.
+   */
+  tokensFor(kind: EnemyKind): string[] {
+    if (kind === 'crawler') return [this.drawWhere((t) => t.length <= 3)];
+    if (kind === 'brute') {
+      return [
+        this.drawWhere((t) => t.length >= 5),
+        this.drawWhere((t) => t.length >= 4),
+        this.drawWhere((t) => t.length >= 5),
+      ];
+    }
+    return [this.next()];
+  }
+
+  /** One token from the normal adaptive flow, restricted by a predicate. */
+  private drawWhere(fit: (token: string) => boolean): string {
+    const slice = this.choose().filter(fit);
+    const token = pickFresh(this.rand, slice.length ? slice : this.choose(), this.recent);
+    this.bookkeep(token);
+    return token;
+  }
+
   next(): string {
     const token = pickFresh(this.rand, this.choose(), this.recent);
+    this.bookkeep(token);
+    return token;
+  }
+
+  private bookkeep(token: string): void {
     this.served += 1;
     const candidate = this.candidates.find((c) => c.token === token);
     if (candidate?.hitsWeak && !this.plan.passthrough) {
@@ -111,7 +144,6 @@ export class AdaptiveSource implements TokenSource {
       this.consecutiveWeak = 0;
     }
     if (candidate?.hitsLowExposure) this.lowServed += 1;
-    return token;
   }
 
   /** Which slice of the pool this slot should draw from. */

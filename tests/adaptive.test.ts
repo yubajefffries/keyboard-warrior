@@ -134,6 +134,35 @@ describe('when injection should not happen at all', () => {
   });
 });
 
+describe('enemy-sized tokens (PRD 14)', () => {
+  it('gives crawlers very short targets', () => {
+    const source = new AdaptiveSource(LESSON, plan(), 3);
+    for (let i = 0; i < 30; i++) {
+      const [token] = source.tokensFor('crawler');
+      expect(token.length).toBeLessThanOrEqual(4); // <=3 preferred; pool fallback tolerated
+    }
+  });
+
+  it('gives brutes three words with real length', () => {
+    const source = new AdaptiveSource(LESSON, plan(), 5);
+    const tokens = source.tokensFor('brute');
+    expect(tokens).toHaveLength(3);
+    for (const t of tokens) expect(t.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('standard enemies draw from the normal adaptive flow', () => {
+    const source = new AdaptiveSource(LESSON, plan({ weak: new Set(['k']) }), 7);
+    for (let i = 0; i < 60; i++) source.tokensFor('standard');
+    expect(source.mix.served).toBe(60); // bookkeeping still counts them
+  });
+
+  it('never serves an empty token even when the length filter finds nothing', () => {
+    // Stage 1 lesson 1 pool is all 2-4 char drills: brute wants >=5 and must fall back.
+    const source = new AdaptiveSource(STAGES[0].lessons[0], plan({ passthrough: true }), 9);
+    for (const t of source.tokensFor('brute')) expect(t.length).toBeGreaterThan(0);
+  });
+});
+
 describe('what the player is told', () => {
   it('says nothing when nothing has slipped', () => {
     const p = createProfile('T');

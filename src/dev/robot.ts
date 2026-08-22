@@ -246,12 +246,16 @@ export class RobotTypist {
         sent = neighbourOf(wanted);
         this.injectedErrors += 1;
       }
-      const t0 = performance.now();
-      this.dispatch(sent);
-      const handlerMs = performance.now() - t0;
-      const sample: RobotSample = { n: this.n, wanted, sent, idealAt, firedAt, handlerMs };
+      // Record BEFORE dispatching: the app may synchronously stop the robot
+      // from inside the dispatch (a lesson completing on this very key), and
+      // the books must balance at that instant or the final key reads as a
+      // phantom drop. handlerMs is patched onto the sample afterwards.
+      const sample: RobotSample = { n: this.n, wanted, sent, idealAt, firedAt, handlerMs: 0 };
       this.samples.push(sample);
       this.hooks.onSample?.(sample);
+      const t0 = performance.now();
+      this.dispatch(sent);
+      sample.handlerMs = performance.now() - t0;
     }
 
     this.n += 1;

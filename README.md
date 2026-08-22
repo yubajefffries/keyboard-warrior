@@ -36,6 +36,9 @@ npm run dev
 | Phase 1b settings: finger guide, text size, high contrast, intensity, motion reduction, volume, pause-on-blur | done |
 | Warm-up offer (day away; accuracy counts, latency excluded) | done |
 | Break suggestion on accuracy collapse | done |
+| Scoring and combo: 10/25/50/100 ladder, accuracy over speed (PRD 17) | done |
+| Crawler + Brute enemies, per-enemy words, boundary-only target switching (PRD 6, 14) | done |
+| Revolver from Stage 3: one word, one shot (PRD 15) | done |
 | Stage gate: taught frequent keys mastered + final lesson passed | done |
 | Keyboard auto-hide, and the finger hint that makes it safe | done |
 | Weak-key injection into lesson content (PRD 13) | done |

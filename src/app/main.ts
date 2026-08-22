@@ -38,6 +38,7 @@ import { judgeLesson, lessonAt, stage, keysTaughtThrough, STAGES } from '../curr
 import { AdaptiveSource, planFor, practiceNote } from '../curriculum/adaptive';
 import { easingFrom, pacingFor } from '../game/pacing';
 import { newFatigueState, recordToken } from '../game/fatigue';
+import { comboVisible } from '../game/scoring';
 import { TAUGHT_KEYS } from '../content/sequences';
 import { weakKeys } from '../profile/mastery';
 import { WordSource, wordsFor } from '../modes/speedtest';
@@ -506,8 +507,8 @@ function startLesson(): void {
       <p class="lead">${escapeHtml(lesson.objective)}</p>
       ${lesson.introduces.length ? `<p>New keys: <b>${lesson.introduces.map((k) => k.toUpperCase()).join('  ')}</b></p>` : ''}
       ${note ? `<p>${escapeHtml(note)}</p>` : ''}
-      <p>${lesson.targetTokens} sequences. Wrong key is a dry fire, and the cursor waits: fix it and carry on.
-         Backspace does nothing here.</p>
+      <p>${lesson.targetTokens} sequences with the ${profile.stage >= 3 ? 'revolver: one word, one shot' : 'pump shotgun'}.
+         Wrong key is a dry fire, and the cursor waits: fix it and carry on. Backspace does nothing here.</p>
       <div class="rowbtns">
         <button id="beginLesson">Begin</button>
         <button id="lessonBack" class="ghost">Back</button>
@@ -557,8 +558,15 @@ function runLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
     },
   });
   // Weak keys are over-represented inside the PRD's limits; a decayed key
-  // rejoins the pool here, silently.
-  encounter.start(new AdaptiveSource(lesson, planFor(profile, lesson), Date.now() & 0xffff), { pacing });
+  // rejoins the pool here, silently. From Stage 3: the lesson dictates the
+  // revolver (PRD 15), crawlers and brutes join (PRD 14), and the combo
+  // meter becomes visible (PRD 17).
+  encounter.start(new AdaptiveSource(lesson, planFor(profile, lesson), Date.now() & 0xffff), {
+    pacing,
+    weapon: profile.stage >= 3 ? 'revolver' : 'shotgun',
+    variety: profile.stage >= 3,
+    showCombo: comboVisible(profile.route, profile.stage),
+  });
 }
 
 function finishLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
@@ -568,6 +576,8 @@ function finishLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
   setChrome({});
 
   const outcome = judgeLesson(profile.stage, p.accuracy, p.wpm, p.tokensCompleted, encounter.worstKey());
+  const showScore = comboVisible(profile.route, profile.stage);
+  const score = encounter.finalizeScore(p.accuracy, p.wpm);
 
   // Session first: it decides which session id the samples belong to, and the
   // low-exposure rate is measured per session, not per lesson.
@@ -620,6 +630,18 @@ function finishLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
         <div class="rl"><span>Speed</span><b>${Math.round(outcome.wpm)} WPM</b></div>
         <div class="rl"><span>Sequences</span><b>${outcome.tokensCompleted}</b></div>
       </div>
+      ${showScore ? `
+      <h2 style="margin-top:26px">Score</h2>
+      <div class="result-lines">
+        <div class="rl"><span>Keys and words</span><b>${(score.keys + score.words).toLocaleString()}</b></div>
+        <div class="rl"><span>Eliminations</span><b>${score.eliminations.toLocaleString()}</b></div>
+        ${score.streakBonuses ? `<div class="rl"><span>Streak bonuses</span><b>${score.streakBonuses.toLocaleString()}</b></div>` : ''}
+        <div class="rl"><span>Accuracy bonus</span><b>${score.accuracyBonus.toLocaleString()}</b></div>
+        <div class="rl"><span>Speed bonus</span><b>${score.wpmBonus.toLocaleString()}</b></div>
+        ${score.perfectBonus ? `<div class="rl"><span>Perfect: not one miss</span><b>${score.perfectBonus.toLocaleString()}</b></div>` : ''}
+        <div class="rl"><span>Best streak</span><b>${encounter.bestStreak}</b></div>
+        <div class="rl"><span><b>Total</b></span><b>${score.total.toLocaleString()}</b></div>
+      </div>` : ''}
       ${stageCleared && advanced ? `<p class="lead" style="margin-top:18px">Stage ${wasStage} cleared. Export your progress from the Progress screen while you are thinking about it.</p>` : ''}
       ${stageCleared && !advanced ? `<p class="lead" style="margin-top:18px">Stage ${wasStage} cleared &mdash; and that is every stage built so far. Every letter on the board is yours. Speed test is where the numbers go up from here; Stages 6-10 (capitals, punctuation, numbers) arrive in later phases.</p>` : ''}
       ${gate && !gate.ready ? gateBlock(gate) : ''}
