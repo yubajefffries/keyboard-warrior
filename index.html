@@ -105,6 +105,29 @@
     .kbkey.hit { background: #2f5f3a; color: #eaf6ea; }
     .kbkey.miss { background: #5f2a26; color: #ffdedb; }
 
+    /* ---------- Settings-driven modes (PRD 21, 22) ---------- */
+    /* Large text: the prompt and its queue scale together. */
+    body.text-large #prompt { font-size: 72px; }
+    body.text-large #promptNext .q0 { font-size: 46px; }
+    body.text-large #promptNext .q1 { font-size: 38px; }
+    body.text-large #promptNext .q2 { font-size: 32px; }
+    body.text-large #promptNext .q3 { font-size: 30px; }
+    body.text-large #promptPast { font-size: 32px; }
+
+    /* High contrast: solid ground, pure figures, brighter queue. WCAG-minded:
+       the error state already never relies on colour alone. */
+    body.high-contrast #prompt { background: #000; border-color: #888; color: #fff; }
+    body.high-contrast #prompt .done { color: #7fff9f; }
+    body.high-contrast #promptNext .q0 { color: #fff; }
+    body.high-contrast #promptNext .q1 { color: #d0d4d8; }
+    body.high-contrast #promptNext .q2, body.high-contrast #promptNext .q3 { color: #aab0b6; }
+    body.high-contrast #promptPast { color: #8a9096; }
+    body.high-contrast #hud, body.high-contrast #clock { background: #000; color: #fff; }
+
+    /* Finger guide off: the keyboard stays a key map, the fingers stay yours. */
+    .kbviz.noguide .kbkey { border-bottom-color: #303338; }
+    .kbviz.noguide .kbkey.target { background: #d7dadd; color: #12141a; box-shadow: 0 0 0 2px rgba(255,255,255,0.25); }
+
     /*
       Finger hint. Appears above the prompt only when the keyboard is hidden
       and the same key has been missed several times. Names the finger, never

@@ -80,6 +80,14 @@ export class KeyboardViz {
     this.root.style.display = on ? 'flex' : 'none';
   }
 
+  /**
+   * PRD 10 finger guide. Off keeps the keyboard usable as a plain key map:
+   * the target key still lights, but neutrally, with no finger-zone colours.
+   */
+  setFingerGuide(on: boolean): void {
+    this.root.classList.toggle('noguide', !on);
+  }
+
   get shown(): boolean {
     return this.visible;
   }

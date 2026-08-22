@@ -48,6 +48,13 @@ export interface EncounterDeps {
 /** Consecutive misses on one key before the finger hint offers itself. PRD 10. */
 export const HINT_AFTER_CONSECUTIVE_MISSES = 3;
 
+export interface EffectSettings {
+  /** Low: silhouettes, no muzzle flash. PRD 21/22 intensity. */
+  intensity: 'low' | 'full';
+  /** Scales recoil, pump, and enemy sway down. Prompt is already locked. */
+  motionReduction: boolean;
+}
+
 export interface EncounterCallbacks {
   onDeath?: (diagnosis: string) => void;
   /**
@@ -56,7 +63,7 @@ export interface EncounterCallbacks {
    * keyboard is currently on screen.
    */
   onStruggle?: (key: string) => void;
-  onTokenComplete?: (token: string, completed: number) => void;
+  onTokenComplete?: (token: string, completed: number, tokenAccuracy: number) => void;
   onPause?: (reason: string) => void;
   onBurstReport?: (html: string, report: RobotReport) => void;
 }
@@ -117,6 +124,10 @@ export class Encounter {
   private activeMs = 0;
   private attempts = new Map<string, { errors: number; presses: number }>();
   private pacing: EncounterPacing = DEFAULT_PACING;
+  private effects: EffectSettings = { intensity: 'full', motionReduction: false };
+  /** Presses at the moment the current token started, for per-token accuracy. */
+  private tokenStartPresses = 0;
+  private tokenStartCorrect = 0;
   private struggleKey: string | null = null;
   private struggleCount = 0;
   private spawnEnemies = true;
@@ -225,8 +236,12 @@ export class Encounter {
         if (this.completed.length > 4) this.completed.pop();
         this.tokensCompleted += 1;
         this.fire();
+        // Accuracy of just this token, for the break-suggestion detector.
+        const presses = this.correctChars + this.missCount - this.tokenStartPresses;
+        const correct = this.correctChars - this.tokenStartCorrect;
+        const tokenAccuracy = presses > 0 ? correct / presses : 1;
         this.nextToken();
-        this.cb.onTokenComplete?.(token, this.tokensCompleted);
+        this.cb.onTokenComplete?.(token, this.tokensCompleted, tokenAccuracy);
       },
     });
 
@@ -313,6 +328,17 @@ export class Encounter {
    */
   setPacing(pacing: EncounterPacing): void {
     this.pacing = pacing;
+  }
+
+  /** Intensity and motion, from the profile's settings. Applies immediately. */
+  setEffects(effects: EffectSettings): void {
+    this.effects = effects;
+    const low = effects.intensity === 'low';
+    // Low intensity: enemies read as dark silhouettes, no red glow.
+    this.activeMat.emissiveColor = low ? new Color3(0.1, 0.02, 0.02) : new Color3(0.45, 0.08, 0.08);
+    this.activeMat.diffuseColor = low ? new Color3(0.3, 0.22, 0.22) : new Color3(0.55, 0.3, 0.3);
+    this.enemyMat.diffuseColor = low ? new Color3(0.28, 0.24, 0.24) : new Color3(0.45, 0.28, 0.28);
+    if (low) this.muzzle.intensity = 0;
   }
 
   /** Retry from checkpoint: same lesson, fresh enemies, keep the token stream. */
@@ -429,6 +455,8 @@ export class Encounter {
   }
 
   private setToken(token: string): void {
+    this.tokenStartPresses = this.correctChars + this.missCount;
+    this.tokenStartCorrect = this.correctChars;
     this.typing.setToken(token);
     this.typing.markTokenShown(performance.now());
     this.redrawActive();
@@ -464,7 +492,8 @@ export class Encounter {
     audio.shell();
     this.recoil = 1;
     this.pumpAnim = 1;
-    this.muzzle.intensity = 2.2;
+    // The muzzle flash is the one photosensitivity-relevant flash in combat.
+    if (this.effects.intensity !== 'low') this.muzzle.intensity = 2.2;
     const target = this.activeEnemy();
     if (target) {
       target.alive = false;
@@ -513,14 +542,15 @@ export class Encounter {
     const dt = this.engine3d.getDeltaTime() / 1000;
     const now = performance.now();
 
+    const motion = this.effects.motionReduction ? 0.25 : 1;
     if (this.recoil > 0) {
       this.recoil = Math.max(0, this.recoil - dt * 6);
-      this.gunRoot.position.z = 1.2 - this.recoil * 0.18;
-      this.gunRoot.rotation.x = -this.recoil * 0.12;
+      this.gunRoot.position.z = 1.2 - this.recoil * 0.18 * motion;
+      this.gunRoot.rotation.x = -this.recoil * 0.12 * motion;
     }
     if (this.pumpAnim > 0) {
       this.pumpAnim = Math.max(0, this.pumpAnim - dt * 3);
-      this.pumpGrip.position.z = 0.28 - Math.sin((1 - this.pumpAnim) * Math.PI) * 0.12;
+      this.pumpGrip.position.z = 0.28 - Math.sin((1 - this.pumpAnim) * Math.PI) * 0.12 * motion;
     }
     if (this.muzzle.intensity > 0) this.muzzle.intensity = Math.max(0, this.muzzle.intensity - dt * 30);
 
@@ -538,7 +568,7 @@ export class Encounter {
       for (const e of this.enemies) {
         if (!e.alive) continue;
         e.mesh.position.z += e.speed * dt;
-        e.mesh.position.x += Math.sin(now / 400 + e.mesh.position.z) * 0.15 * dt;
+        e.mesh.position.x += Math.sin(now / 400 + e.mesh.position.z) * 0.15 * dt * motion;
         e.mesh.material = e === active ? this.activeMat : this.enemyMat;
         if (e.mesh.position.z >= KILL_LINE_Z) {
           this.die();

@@ -23,8 +23,20 @@ export class WeaponAudio {
     }
     this.ctx = new AudioContext();
     this.master = this.ctx.createGain();
-    this.master.gain.value = 0.6;
+    this.master.gain.value = this.volume;
     this.master.connect(this.ctx.destination);
+  }
+
+  private volume = 0.6;
+
+  /**
+   * 0..1 from the settings slider. Mapped so the profile default of 0.5 lands
+   * on the gain this kit was tuned at, and 0 is actually silent.
+   */
+  setVolume(v: number): void {
+    this.volume = Math.min(1, Math.max(0, v)) * 1.2;
+    if (this.volume > 1) this.volume = 1;
+    if (this.master) this.master.gain.value = this.volume;
   }
 
   /**

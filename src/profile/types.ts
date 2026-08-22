@@ -151,6 +151,8 @@ export interface PlacementResult {
 
 export interface ProfileSettings {
   keyboardViz: KeyboardVizPref;
+  /** Key Highlighting or Off. Animated Finger and Transparent Hands are Phase 3. PRD 10. */
+  fingerGuide: 'highlight' | 'off';
   textSize: 'normal' | 'large';
   highContrast: boolean;
   intensity: Intensity;
@@ -166,6 +168,7 @@ export function defaultSettings(route: Route): ProfileSettings {
   return {
     // PRD 3.3: Beginner on, Intermediate auto, Advanced off.
     keyboardViz: route === 'beginner' ? 'on' : route === 'intermediate' ? 'auto' : 'off',
+    fingerGuide: 'highlight',
     textSize: 'normal',
     highContrast: false,
     intensity: 'full',

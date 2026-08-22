@@ -47,6 +47,13 @@ const PREFERRED_CONTEXTS: StatContext[] = ['combat', 'speed_test'];
 export interface AbsorbOptions {
   now?: Date;
   /**
+   * PRD 11 warm-up rule: samples count toward accuracy but are excluded from
+   * latency baselines, because post-break typing is slow and would poison the
+   * EMA. Skips both the interval window and the baseline update; presses,
+   * outcomes, and exposure still count.
+   */
+  excludeLatency?: boolean;
+  /**
    * Which session these samples belong to. PRD 21 defines a session as
    * continuous play separated by 30+ minutes of idle, so two lessons back to
    * back share an id and count once toward the low-exposure rate. Without it,
@@ -87,7 +94,7 @@ export function absorbSamples(profile: Profile, samples: KeySample[], options: A
 
     // Mastery uses inter-key interval only. First-key latency includes reading
     // the prompt, which is a different skill and is reported separately.
-    if (s.interKeyMs !== null && s.interKeyMs > 0 && s.interKeyMs < 5_000) {
+    if (!options.excludeLatency && s.interKeyMs !== null && s.interKeyMs > 0 && s.interKeyMs < 5_000) {
       agg.recentIntervals.push(Math.round(s.interKeyMs));
       if (agg.recentIntervals.length > MASTERY_WINDOW) {
         agg.recentIntervals.splice(0, agg.recentIntervals.length - MASTERY_WINDOW);

@@ -33,6 +33,9 @@ npm run dev
 | Export / import JSON with validation and migration | done |
 | Speed Test 30s / 60s | done |
 | Mastery engine: windows, decay, staleness, low-exposure | done |
+| Phase 1b settings: finger guide, text size, high contrast, intensity, motion reduction, volume, pause-on-blur | done |
+| Warm-up offer (day away; accuracy counts, latency excluded) | done |
+| Break suggestion on accuracy collapse | done |
 | Stage gate: taught frequent keys mastered + final lesson passed | done |
 | Keyboard auto-hide, and the finger hint that makes it safe | done |
 | Weak-key injection into lesson content (PRD 13) | done |

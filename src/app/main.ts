@@ -37,12 +37,11 @@ import {
 import { judgeLesson, lessonAt, stage, keysTaughtThrough, STAGES } from '../curriculum/stages';
 import { AdaptiveSource, planFor, practiceNote } from '../curriculum/adaptive';
 import { easingFrom, pacingFor } from '../game/pacing';
-import {
-  PHASE_1A_DURATIONS,
-  SpeedTestScorer,
-  WordSource,
-  wordsFor,
-} from '../modes/speedtest';
+import { newFatigueState, recordToken } from '../game/fatigue';
+import { TAUGHT_KEYS } from '../content/sequences';
+import { weakKeys } from '../profile/mastery';
+import { WordSource, wordsFor } from '../modes/speedtest';
+import { PHASE_1A_DURATIONS, SpeedTestScorer } from '../modes/speedtest';
 import type { SpeedTestResult } from '../profile/types';
 
 // ---------- DOM ----------
@@ -78,6 +77,9 @@ const encounter = new Encounter({
 });
 
 const drill = new TimedDrill({ prompt, keyboard, pipeline, audio, lookahead }, 'speed_test');
+/** Warm-ups record as learn: combat and speed-test evidence is preferred by
+ *  the mastery engine, and a cold-handed warm-up should not outrank it. */
+const warmupDrill = new TimedDrill({ prompt, keyboard, pipeline, audio, lookahead }, 'learn');
 
 pipeline.onWarnings((w) => {
   const msgs: string[] = [];
@@ -242,6 +244,7 @@ function showCreate(): void {
     }
     profile = created;
     store.setActive(created.id);
+    applySettings();
     showPlacementIntro();
   }
 }
@@ -252,6 +255,7 @@ function openProfile(id: string): void {
   profile = found;
   store.setActive(id);
   audio.ensureStarted();
+  applySettings();
   if (!profile.placement) showPlacementIntro();
   else showMenu();
 }
@@ -417,9 +421,79 @@ function showMenu(): void {
  * was wrong today" says nothing about next week.
  */
 let deathAccuracies: number[] = [];
+/** Break-suggestion state, whole play session, across lessons. PRD 11. */
+const fatigue = newFatigueState();
+/** One line queued for the next result or death screen. Never a toast mid-combat. */
+let fatigueNote: string | null = null;
+/** The warm-up is offered once per app session at most. */
+let warmupHandled = false;
+
+const WARMUP_SECONDS = 45;
+const WARMUP_GAP_HOURS = 24;
+
+/** PRD 11: a day or more away earns the offer of a short warm-up first. */
+function shouldOfferWarmup(): boolean {
+  if (!profile || warmupHandled) return false;
+  const gapMs = Date.now() - Date.parse(profile.lastPlayedAt);
+  return Number.isFinite(gapMs) && gapMs >= WARMUP_GAP_HOURS * 3_600_000;
+}
+
+function showWarmupOffer(): void {
+  warmupHandled = true;
+  setChrome({});
+  showScreen(`
+    <div class="sheet narrow">
+      <h1>It has been a minute</h1>
+      <p class="lead">Cold hands type slowly, and the first minutes back always score worse than you really are.</p>
+      <p>${WARMUP_SECONDS} seconds of easy typing first. It counts toward accuracy but not toward
+         your speed baselines, so a slow restart cannot mark any key as slipping.</p>
+      <div class="rowbtns">
+        <button id="startWarmup">Warm up first</button>
+        <button id="skipWarmup" class="ghost">Straight to the lesson</button>
+      </div>
+    </div>`);
+  on('startWarmup', runWarmup);
+  on('skipWarmup', startLesson);
+}
+
+function runWarmup(): void {
+  if (!profile) return;
+  audio.ensureStarted();
+  hideScreen();
+  setChrome({ prompt: true, clock: true, keyboard: true });
+
+  // Weak keys first, then whatever the profile has been taught; home row is
+  // the floor for a profile with nothing else.
+  const taught = keysTaughtThrough(profile.stage);
+  const weak = new Set(weakKeys(profile, [...taught]).slice(0, 6));
+  const pool = wordsFor(taught.size ? taught : TAUGHT_KEYS);
+  const weighted = pool.filter((w) => [...w].some((ch) => weak.has(ch)));
+  const source = new WordSource(weighted.length >= 8 ? weighted : pool, Date.now() & 0xffff);
+
+  warmupDrill.start(source, WARMUP_SECONDS * 1000, {
+    onTick: (remaining) => setClock(remaining),
+    onFinish: () => {
+      // Counts toward accuracy and exposure, never toward latency baselines
+      // (PRD 11): post-break typing is slow and would poison the EMA.
+      const session = recordActivity(profile!, {
+        correctChars: warmupDrill.stats.samplesIn().filter((x) => x.correct).length,
+        activeMs: WARMUP_SECONDS * 1000,
+        accuracy: warmupDrill.stats.totalAccuracy(),
+      });
+      absorbSamples(profile!, warmupDrill.stats.samplesIn(), {
+        sessionId: session.startedAt,
+        excludeLatency: true,
+      });
+      save();
+      startLesson();
+    },
+    onAbort: () => startLesson(), // a lost warm-up is no loss at all
+  });
+}
 
 function startLesson(): void {
   if (!profile) return;
+  if (shouldOfferWarmup()) return showWarmupOffer();
   const lesson = lessonAt(profile.stage, profile.lesson);
   if (!lesson) return showMenu();
   deathAccuracies = [];
@@ -455,7 +529,11 @@ function runLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
   console.debug('[pacing]', pacing);
 
   encounter.on({
-    onTokenComplete: (_token, completed) => {
+    onTokenComplete: (_token, completed, tokenAccuracy) => {
+      const reading = recordToken(fatigue, tokenAccuracy);
+      if (reading.suggestBreak) {
+        fatigueNote = `Accuracy has slipped ${Math.round((reading.sessionMean - reading.recentMean) * 100)} points below your session. Five minutes away beats bad reps: mastery is watching all of this.`;
+      }
       if (completed >= lesson.targetTokens) finishLesson(lesson);
     },
     onDeath: (diagnosis) => {
@@ -469,9 +547,9 @@ function runLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
     },
     onPause: (reason) => showPause(reason),
     onStruggle: (key) => {
-      // Only when the scaffold is off. If the keyboard is already on screen
-      // the answer is in front of them and a second hint is just noise.
-      if (!keyboard.shown) fingerHint.show(key);
+      // Only when the scaffold is off (the answer would already be on screen)
+      // and only when the finger guide is wanted at all.
+      if (!keyboard.shown && profile?.settings.fingerGuide !== 'off') fingerHint.show(key);
     },
     onBurstReport: (html) => {
       robotPanel.style.display = 'block';
@@ -545,12 +623,14 @@ function finishLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
       ${stageCleared && advanced ? `<p class="lead" style="margin-top:18px">Stage ${wasStage} cleared. Export your progress from the Progress screen while you are thinking about it.</p>` : ''}
       ${stageCleared && !advanced ? `<p class="lead" style="margin-top:18px">Stage ${wasStage} cleared &mdash; and that is every stage built so far. Every letter on the board is yours. Speed test is where the numbers go up from here; Stages 6-10 (capitals, punctuation, numbers) arrive in later phases.</p>` : ''}
       ${gate && !gate.ready ? gateBlock(gate) : ''}
+      ${fatigueNote ? `<p class="note" style="text-align:center;margin-top:14px">${escapeHtml(fatigueNote)}</p>` : ''}
       <div class="rowbtns">
         ${outcome.passed && advanced ? '<button id="nextLesson">Next lesson</button>' : ''}
         ${!outcome.passed || (gate !== null && !gate.ready) ? '<button id="retryLesson">Try it again</button>' : ''}
         <button id="resultMenu" class="ghost">Back to menu</button>
       </div>
     </div>`);
+  fatigueNote = null;
   on('nextLesson', startLesson);
   on('retryLesson', () => runLesson(lesson));
   on('resultMenu', showMenu);
@@ -581,6 +661,7 @@ function showDeath(diagnosis: string, eased = false): void {
       ${eased
         ? '<p>You were accurate, so that one is on the clock, not on you. They will come slower this time.</p>'
         : '<p>Nothing was lost. Misses never kill here; only letting one close the distance does.</p>'}
+      ${fatigueNote ? `<p class="note" style="text-align:center">${escapeHtml(fatigueNote)}</p>` : ''}
       <div class="rowbtns">
         <button id="retryCheckpoint">Retry from checkpoint</button>
         <button id="deathMenu" class="ghost">Back to menu</button>
@@ -588,6 +669,7 @@ function showDeath(diagnosis: string, eased = false): void {
     </div>`,
     { dim: true },
   );
+  fatigueNote = null;
   on('retryCheckpoint', () => {
     hideScreen();
     // Re-derive pacing so timer-was-wrong deaths take effect on the retry.
@@ -805,26 +887,57 @@ const BURST_CHARS = 200;
 function showSettings(back: () => void): void {
   if (!profile) return;
   const s = profile.settings;
+
+  /** One row of segment buttons; data-set attributes drive one generic handler. */
+  function seg<T extends string | number>(key: string, values: T[], current: T, labels?: string[]): string {
+    return `<span class="seg">${values
+      .map(
+        (v, i) =>
+          `<button data-set="${key}" data-value="${v}" class="${String(current) === String(v) ? 'on' : ''}">${labels ? labels[i] : v}</button>`,
+      )
+      .join('')}</span>`;
+  }
+
   showScreen(
     `<div class="sheet narrow">
       <h1>Settings</h1>
       <p class="sub">${escapeHtml(profile.name)}</p>
       <div class="settings">
         <div class="row">
-          <span>On-screen keyboard<span class="keyhint">PRD 10</span></span>
-          <span class="seg">
-            ${(['auto', 'on', 'off'] as const)
-              .map((v) => `<button data-viz="${v}" class="${s.keyboardViz === v ? 'on' : ''}">${v}</button>`)
-              .join('')}
-          </span>
+          <span>On-screen keyboard</span>
+          ${seg('keyboardViz', ['auto', 'on', 'off'], s.keyboardViz)}
         </div>
         <div class="row">
-          <span>Words shown ahead of the one you are typing<span class="keyhint">F2</span></span>
-          <span class="seg">
-            ${[0, 1, 2, 3, 4]
-              .map((v) => `<button data-look="${v}" class="${s.lookahead === v ? 'on' : ''}">${v}</button>`)
-              .join('')}
-          </span>
+          <span>Finger guide<span class="keyhint">colours + hints</span></span>
+          ${seg('fingerGuide', ['highlight', 'off'], s.fingerGuide, ['on', 'off'])}
+        </div>
+        <div class="row">
+          <span>Words shown ahead<span class="keyhint">F2</span></span>
+          ${seg('lookahead', [0, 1, 2, 3, 4], s.lookahead)}
+        </div>
+        <div class="row">
+          <span>Text size</span>
+          ${seg('textSize', ['normal', 'large'], s.textSize)}
+        </div>
+        <div class="row">
+          <span>High contrast text</span>
+          ${seg('highContrast', ['off', 'on'], s.highContrast ? 'on' : 'off')}
+        </div>
+        <div class="row">
+          <span>Intensity<span class="keyhint">low: silhouettes, no flash</span></span>
+          ${seg('intensity', ['full', 'low'], s.intensity)}
+        </div>
+        <div class="row">
+          <span>Motion reduction<span class="keyhint">less recoil and sway</span></span>
+          ${seg('motionReduction', ['off', 'on'], s.motionReduction ? 'on' : 'off')}
+        </div>
+        <div class="row">
+          <span>Sound volume</span>
+          ${seg('audioMix', [0, 0.25, 0.5, 0.75, 1], s.audioMix, ['mute', '25', '50', '75', '100'])}
+        </div>
+        <div class="row">
+          <span>Pause when the window loses focus</span>
+          ${seg('pauseOnBlur', ['on', 'off'], s.pauseOnBlur ? 'on' : 'off')}
         </div>
         <div class="row">
           <span>Robot burst speed<span class="keyhint">F4 cycles, F9 runs</span></span>
@@ -835,24 +948,24 @@ function showSettings(back: () => void): void {
           </span>
         </div>
       </div>
-      <p class="note" style="margin-top:16px">Auto shows the keyboard for beginners and hides it for everyone
-         else. It will follow per-key mastery once the mastery engine lands.</p>
+      <p class="note" style="margin-top:16px">Keyboard on Auto follows mastery: it hides once every taught key
+         is solid and returns if one slips. Timed speed tests always discard on focus loss regardless of the
+         pause setting, because a paused clock makes the number a lie.</p>
       <div class="rowbtns"><button id="settingsBack">Done</button></div>
     </div>`,
     { dim: true },
   );
 
-  for (const el of screenEl.querySelectorAll('[data-viz]')) {
+  for (const el of screenEl.querySelectorAll('[data-set]')) {
     el.addEventListener('click', () => {
-      profile!.settings.keyboardViz = (el as HTMLElement).dataset.viz as 'auto' | 'on' | 'off';
+      const key = (el as HTMLElement).dataset.set!;
+      const raw = (el as HTMLElement).dataset.value!;
+      const st = profile!.settings as unknown as Record<string, unknown>;
+      if (key === 'lookahead' || key === 'audioMix') st[key] = Number(raw);
+      else if (key === 'highContrast' || key === 'motionReduction' || key === 'pauseOnBlur') st[key] = raw === 'on';
+      else st[key] = raw;
       save();
-      showSettings(back);
-    });
-  }
-  for (const el of screenEl.querySelectorAll('[data-look]')) {
-    el.addEventListener('click', () => {
-      profile!.settings.lookahead = Number((el as HTMLElement).dataset.look);
-      save();
+      applySettings();
       showSettings(back);
     });
   }
@@ -863,6 +976,23 @@ function showSettings(back: () => void): void {
     });
   }
   on('settingsBack', back);
+}
+
+/**
+ * Push the active profile's settings into every system that renders or plays.
+ * Called on profile open and after any settings change, so a change made from
+ * the pause menu is visible the moment the game resumes.
+ */
+function applySettings(): void {
+  const s = profile?.settings;
+  document.body.classList.toggle('text-large', s?.textSize === 'large');
+  document.body.classList.toggle('high-contrast', s?.highContrast === true);
+  keyboard.setFingerGuide(s?.fingerGuide !== 'off');
+  audio.setVolume(s?.audioMix ?? 0.5);
+  encounter.setEffects({
+    intensity: s?.intensity ?? 'full',
+    motionReduction: s?.motionReduction === true,
+  });
 }
 
 // ---------- Clock ----------
@@ -910,8 +1040,11 @@ window.addEventListener('keydown', (e) => {
 
 // Blur pauses combat and discards timed attempts (PRD 18, 21).
 function onFocusLost(reason: string): void {
+  // Timed drills ALWAYS discard on blur (PRD 18): pausing a clock makes the
+  // WPM a lie, and that holds whatever the pause preference says.
   if (drill.isRunning) drill.abort(reason);
-  else encounter.pause(reason);
+  else if (warmupDrill.isRunning) warmupDrill.abort(reason);
+  else if (profile?.settings.pauseOnBlur !== false) encounter.pause(reason);
 }
 window.addEventListener('blur', () => onFocusLost('The window lost focus.'));
 document.addEventListener('visibilitychange', () => {
@@ -922,6 +1055,7 @@ document.addEventListener('visibilitychange', () => {
 const resumed = store.active();
 if (resumed) {
   profile = resumed;
+  applySettings();
   if (!profile.placement) showPlacementIntro();
   else showMenu();
 } else {

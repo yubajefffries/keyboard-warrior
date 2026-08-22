@@ -327,6 +327,31 @@ describe('hostile save files', () => {
     }
   });
 
+  it('normalizes enum settings a hand-edited file corrupted', () => {
+    const result = roundTrip((p) => {
+      (p.profiles as Record<string, unknown>[])[0].settings = {
+        keyboardViz: 'banana', fingerGuide: 'laser', textSize: 'enormous', intensity: 'extreme',
+      };
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const s = result.profiles[0].settings;
+      expect(s.keyboardViz).toBe('on'); // beginner default
+      expect(s.fingerGuide).toBe('highlight');
+      expect(s.textSize).toBe('normal');
+      expect(s.intensity).toBe('full');
+    }
+  });
+
+  it('gives an old save the finger guide default', () => {
+    const result = roundTrip((p) => {
+      const st = (p.profiles as Record<string, unknown>[])[0].settings as Record<string, unknown>;
+      delete st.fingerGuide;
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.profiles[0].settings.fingerGuide).toBe('highlight');
+  });
+
   it('caps a very long profile name', () => {
     const result = roundTrip((p) => {
       (p.profiles as Record<string, unknown>[])[0].name = 'x'.repeat(5000);

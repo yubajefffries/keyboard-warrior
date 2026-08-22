@@ -359,6 +359,12 @@ function mergeSettings(input: unknown, route: Route): ProfileSettings {
   }
   merged.lookahead = Math.min(4, Math.max(0, Math.floor(merged.lookahead)));
   merged.audioMix = Math.min(1, Math.max(0, merged.audioMix));
+  // Enum fields: a typeof check alone would wave through any string a
+  // hand-edited file put there, and the UI renders these into class names.
+  if (!['auto', 'on', 'off'].includes(merged.keyboardViz)) merged.keyboardViz = base.keyboardViz;
+  if (!['highlight', 'off'].includes(merged.fingerGuide)) merged.fingerGuide = base.fingerGuide;
+  if (!['normal', 'large'].includes(merged.textSize)) merged.textSize = base.textSize;
+  if (!['low', 'full'].includes(merged.intensity)) merged.intensity = base.intensity;
   return merged;
 }
 
