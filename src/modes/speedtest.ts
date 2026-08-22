@@ -15,7 +15,8 @@ import { mulberry32, pickFresh } from '../util/rand';
 import type { TokenSource } from '../content/sequences';
 import type { SpeedTestResult } from '../profile/types';
 
-export const PHASE_1A_DURATIONS = [30, 60] as const;
+/** PRD 1b: 15s / 30s / 60s / 2m. The 5-minute test ships in Phase 2. */
+export const SPEED_TEST_DURATIONS = [15, 30, 60, 120] as const;
 
 /** Common English words, filtered per profile to keys the player has met. */
 const COMMON_WORDS = [

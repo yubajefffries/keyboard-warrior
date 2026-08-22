@@ -42,7 +42,7 @@ import { comboVisible } from '../game/scoring';
 import { TAUGHT_KEYS } from '../content/sequences';
 import { weakKeys } from '../profile/mastery';
 import { WordSource, wordsFor } from '../modes/speedtest';
-import { PHASE_1A_DURATIONS, SpeedTestScorer } from '../modes/speedtest';
+import { SPEED_TEST_DURATIONS, SpeedTestScorer } from '../modes/speedtest';
 import type { SpeedTestResult } from '../profile/types';
 
 // ---------- DOM ----------
@@ -751,19 +751,19 @@ function showSpeedSetup(): void {
       <p>Words are filtered to keys you have been taught, so this measures typing rather than surprise.</p>
       ${best ? `<p class="sub">Your best: ${Math.round(best.wpm)} WPM at ${Math.round(best.accuracy * 100)}% over ${best.durationS}s</p>` : ''}
       <div class="rowbtns">
-        ${PHASE_1A_DURATIONS.map((d) => `<button data-dur="${d}">${d} seconds</button>`).join('')}
+        ${SPEED_TEST_DURATIONS.map((d) => `<button data-dur="${d}">${d < 60 ? `${d} seconds` : `${d / 60} minute${d > 60 ? 's' : ''}`}</button>`).join('')}
       </div>
       <div class="rowbtns"><button id="speedBack" class="ghost">Back</button></div>
       <p class="note" style="text-align:center;margin-top:18px">
         Clicking away discards the attempt. A paused clock would make the number meaningless.</p>
     </div>`);
   for (const el of screenEl.querySelectorAll('[data-dur]')) {
-    el.addEventListener('click', () => runSpeedTest(Number((el as HTMLElement).dataset.dur) as 30 | 60));
+    el.addEventListener('click', () => runSpeedTest(Number((el as HTMLElement).dataset.dur) as 15 | 30 | 60 | 120));
   }
   on('speedBack', showMenu);
 }
 
-function runSpeedTest(durationS: 30 | 60): void {
+function runSpeedTest(durationS: 15 | 30 | 60 | 120): void {
   if (!profile) return;
   audio.ensureStarted();
   hideScreen();
@@ -828,7 +828,7 @@ function showSpeedResult(result: SpeedTestResult, weak: { slowest: string[]; lea
         <button id="speedMenu" class="ghost">Back to menu</button>
       </div>
     </div>`);
-  on('againSpeed', () => runSpeedTest(result.durationS as 30 | 60));
+  on('againSpeed', () => runSpeedTest(result.durationS as 15 | 30 | 60 | 120));
   on('speedMenu', showMenu);
 }
 

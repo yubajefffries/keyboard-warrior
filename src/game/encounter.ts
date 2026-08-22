@@ -28,6 +28,7 @@ import { TypingEngine } from './engine';
 import { StatsTracker } from '../stats/keystats';
 import type { WeaponAudio } from '../audio/sfx';
 import { Scorer, type EnemyKind, type ScoreBreakdown } from './scoring';
+import { buildLaboratory } from './environment';
 import type { PromptView } from '../ui/prompt';
 import type { KeyboardViz } from '../ui/keyboard';
 import { RobotTypist, judgeBurst, type RobotReport } from '../dev/robot';
@@ -181,34 +182,26 @@ export class Encounter {
 
     this.engine3d = new Engine(deps.canvas, true, { preserveDrawingBuffer: false, stencil: false });
     this.scene = new Scene(this.engine3d);
-    this.scene.clearColor = new Color4(0.02, 0.02, 0.03, 1);
+    this.scene.clearColor = new Color4(0.015, 0.025, 0.022, 1);
 
     this.camera = new FreeCamera('cam', new Vector3(0, 1.7, 0), this.scene);
     this.camera.setTarget(new Vector3(0, 1.5, -10));
     this.camera.inputs.clear(); // rail shooter: hands never leave typing position
 
+    // Lighting stays inside the budget the gray-box used: hemispheric ambient
+    // plus one lamp; the muzzle flash is the second dynamic light. Everything
+    // else the laboratory appears lit by is emissive material, which is free.
     const ambient = new HemisphericLight('ambient', new Vector3(0, 1, 0), this.scene);
-    ambient.intensity = 0.25;
-    ambient.diffuse = new Color3(0.5, 0.55, 0.65);
-    const lamp = new PointLight('lamp', new Vector3(0, 3.4, -8), this.scene);
-    lamp.intensity = 0.7;
-    lamp.diffuse = new Color3(1.0, 0.85, 0.7);
+    ambient.intensity = 0.32;
+    ambient.diffuse = new Color3(0.45, 0.58, 0.55); // cold institutional green
+    ambient.groundColor = new Color3(0.08, 0.1, 0.09);
+    const lamp = new PointLight('lamp', new Vector3(0, 3.6, -7), this.scene);
+    lamp.intensity = 0.65;
+    lamp.diffuse = new Color3(0.75, 0.9, 0.8);
 
-    const gray = new StandardMaterial('gray', this.scene);
-    gray.diffuseColor = new Color3(0.22, 0.22, 0.25);
-    gray.specularColor = Color3.Black();
-
-    const ground = MeshBuilder.CreateGround('ground', { width: 12, height: 44 }, this.scene);
-    ground.position.z = -18;
-    ground.material = gray;
-    for (const side of [-1, 1]) {
-      const wall = MeshBuilder.CreateBox('wall', { width: 0.4, height: 5, depth: 44 }, this.scene);
-      wall.position.set(side * 6, 2.5, -18);
-      wall.material = gray;
-    }
-    const backWall = MeshBuilder.CreateBox('back', { width: 12, height: 5, depth: 0.4 }, this.scene);
-    backWall.position.set(0, 2.5, -40);
-    backWall.material = gray;
+    // The abandoned laboratory (PRD 8, Phase 1b environment pass). Static,
+    // frozen, procedural; see environment.ts for the budget notes.
+    buildLaboratory(this.scene);
 
     // Recoil moves the GUN, never the prompt.
     this.gunRoot = new TransformNode('gunRoot', this.scene);

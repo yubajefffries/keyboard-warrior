@@ -4,7 +4,7 @@ Type like your life depends on it. A first-person action typing game and touch-t
 
 **Play it:** [keyboard-warrior-nine.vercel.app](https://keyboard-warrior-nine.vercel.app) or [yubajefffries.github.io/keyboard-warrior](https://yubajefffries.github.io/keyboard-warrior/). Profiles live in your browser's localStorage; the Progress screen's export button is your save file.
 
-**Status: Phase 1a in progress.** Phase 0's gray-box slice proved the input pipeline and the typing-to-shoot loop; Phase 1a turns it into something a non-typist and a decent typist can both sit down with. See `docs/PRD_v0_4.md` for the full product spec.
+**Status: Phase 1b complete.** Phase 0 gates cleared on real hardware. Placement, Stages 1-5, mastery gates, adaptive difficulty, scoring and combo, three enemy types, two weapons, and the abandoned laboratory are all live. Next: Phase 2 (Stages 6-10, survival, practice mode). See `docs/PRD_v0_4.md` for the full product spec.
 
 ## Run it
 
@@ -31,7 +31,8 @@ npm run dev
 | Learn-mode health: only a reached player dies | done |
 | Progress screen: WPM/accuracy history, per-key heatmap, stage gates | done |
 | Export / import JSON with validation and migration | done |
-| Speed Test 30s / 60s | done |
+| Speed Test 15s / 30s / 60s / 2m | done |
+| Environment pass: the abandoned laboratory, inside the performance budget | done |
 | Mastery engine: windows, decay, staleness, low-exposure | done |
 | Phase 1b settings: finger guide, text size, high contrast, intensity, motion reduction, volume, pause-on-blur | done |
 | Warm-up offer (day away; accuracy counts, latency excluded) | done |
@@ -62,19 +63,13 @@ npm run dev
 - Saves loaded from browser storage go through the same migration and validation as an imported file. Code that reads an old blob without upgrading it gets a profile missing every field the current engine expects.
 - Enemy pacing never demands more than the player has demonstrated: the spawn interval has no upper clamp, because capping it for a slow typist would quietly reintroduce the demand the 20-40% buffer exists to remove. A lesson consistently failed at >=90% accuracy widens the buffer: the timer is wrong, not the player.
 
-## Phase 0 exit gates (still open)
+## Phase 0 exit gates: CLEARED
 
-The PRD says Phase 1a does not begin until these are green. Phase 1a code exists
-anyway, because all four gates need a human at a real keyboard on real hardware
-and none of them can be closed by writing more code. Treat them as gates on
-letting anyone else play, not on the work continuing.
-
-1. Input Fidelity Test passes in Chrome, Edge, Firefox (logs filed in repo).
-   The robot burst now covers the app-layer half on any machine; what still
-   needs fingers is proof the OS/browser path never drops a real key.
-2. Text Legibility Test passes at 1080p on UHD-class integrated graphics
-3. Typing-to-shoot feels compelling with gray boxes and the real shotgun kit
-4. 60fps at 1080p on integrated graphics through a 100+ WPM burst
+Verified by the product owner on real hardware, 2026-08-22: input fidelity,
+legibility, feel, and frame rate all pass on an actual machine with an actual
+keyboard. The robot burst covers the app-layer half of gate 1 in CI forever;
+harness logs can still be exported to `docs/input-fidelity-logs/` per browser
+whenever a formal record is wanted.
 
 ## License
 
