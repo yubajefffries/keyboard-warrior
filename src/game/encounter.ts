@@ -25,6 +25,7 @@ import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 
 import type { InputPipeline } from '../input/pipeline';
 import { TypingEngine } from './engine';
+import { buildCreature, makeGarbMaterial, type Creature } from './creatures';
 import { StatsTracker } from '../stats/keystats';
 import type { WeaponAudio } from '../audio/sfx';
 import { Scorer, type EnemyKind, type ScoreBreakdown } from './scoring';
@@ -112,7 +113,7 @@ export interface EnemyTokenProvider {
 export type WeaponKind = 'shotgun' | 'revolver';
 
 interface EnemyT {
-  mesh: Mesh;
+  creature: Creature;
   speed: number;
   alive: boolean;
   kind: EnemyKind;
@@ -144,6 +145,7 @@ export class Encounter {
   private crawlerMat: StandardMaterial;
   private bruteMat: StandardMaterial;
   private activeMat: StandardMaterial;
+  private garbMat: StandardMaterial;
   private shotgunNode: TransformNode;
   private revolverNode: TransformNode;
   private cylinderMesh: Mesh;
@@ -179,6 +181,14 @@ export class Encounter {
   private activeMs = 0;
   private attempts = new Map<string, { errors: number; presses: number }>();
   private pacing: EncounterPacing = DEFAULT_PACING;
+  /**
+   * Retired bodies, reused by kind. Killing an enemy runs inside the
+   * keystroke handler, and disposing (or rebuilding) a ~20-mesh hierarchy
+   * there would eat the 4 ms per-key budget the burst test enforces; a
+   * pooled creature is disabled and re-enabled instead. Bounded by
+   * MAX_RENDERED per kind.
+   */
+  private creaturePool: Record<EnemyKind, Creature[]> = { standard: [], crawler: [], brute: [] };
   private effects: EffectSettings = { intensity: 'full', motionReduction: false };
   /** Presses at the moment the current token started, for per-token accuracy. */
   private tokenStartPresses = 0;
@@ -282,6 +292,7 @@ export class Encounter {
     this.bruteMat = new StandardMaterial('bruteMat', this.scene);
     this.bruteMat.diffuseColor = new Color3(0.3, 0.25, 0.33);
     this.bruteMat.specularColor = Color3.Black();
+    this.garbMat = makeGarbMaterial(this.scene);
 
     this.typing = new TypingEngine(this.tracker, {
       onPress: (pressed) => {
@@ -330,13 +341,14 @@ export class Encounter {
             this.fireWeapon(true);
             this.scorer.elimination(target.kind);
             target.alive = false;
-            target.mesh.dispose();
+            this.releaseCreature(target.creature);
             this.cb.onKill?.(target.kind);
           } else {
             this.fireWeapon(false);
             this.deps.audio.bruteHit();
             // Staggered, not stopped: knocked back but still coming.
-            target.mesh.position.z = Math.max(-38, target.mesh.position.z - 1.2);
+            target.creature.root.position.z = Math.max(-38, target.creature.root.position.z - 1.2);
+            target.creature.stagger();
           }
         } else {
           this.fireWeapon(true);
@@ -643,7 +655,7 @@ export class Encounter {
     let best: EnemyT | null = null;
     for (const e of this.enemies) {
       if (!e.alive) continue;
-      if (!best || e.mesh.position.z > best.mesh.position.z) best = e;
+      if (!best || e.creature.root.position.z > best.creature.root.position.z) best = e;
     }
     if (!best) {
       this.spawn();
@@ -662,10 +674,10 @@ export class Encounter {
 
     // World highlight moves with the engagement, not per frame.
     if (this.active && this.active !== best && this.active.alive) {
-      this.active.mesh.material = this.baseMat(this.active.kind);
+      this.active.creature.setActive(false);
     }
     this.active = best;
-    best.mesh.material = this.activeMat;
+    best.creature.setActive(true);
 
     this.tokenStartPresses = this.correctChars + this.missCount;
     this.tokenStartCorrect = this.correctChars;
@@ -698,7 +710,7 @@ export class Encounter {
     const out = [...this.active.tokens.slice(1)];
     const others = this.enemies
       .filter((e) => e.alive && e !== this.active)
-      .sort((a, b) => b.mesh.position.z - a.mesh.position.z);
+      .sort((a, b) => b.creature.root.position.z - a.creature.root.position.z);
     for (const e of others) out.push(...e.tokens);
     return out.slice(0, count);
   }
@@ -736,20 +748,13 @@ export class Encounter {
     if (this.enemies.filter((e) => e.alive).length >= MAX_RENDERED) return;
 
     const kind = this.rollKind();
-    const dims =
-      kind === 'crawler'
-        ? { height: 0.9, radius: 0.32, y: 0.45 }
-        : kind === 'brute'
-          ? { height: 2.5, radius: 0.55, y: 1.25 }
-          : { height: 1.8, radius: 0.35, y: 0.9 };
-    const mesh = MeshBuilder.CreateCapsule('enemy', { height: dims.height, radius: dims.radius }, this.scene);
-    mesh.position.set((Math.random() - 0.5) * 7, dims.y, -34 - Math.random() * 4);
-    mesh.material = this.baseMat(kind);
+    const creature = this.acquireCreature(kind);
+    creature.root.position.set((Math.random() - 0.5) * 7, 0, -34 - Math.random() * 4);
     // Walk time comes from the pacing model; +/-10% so a group still shambles
     // rather than marching. Kind multipliers are what make a crawler a crawler.
     const speed =
       (MEAN_TRAVEL_UNITS / this.pacing.walkTimeS) * KIND_SPEED[kind] * (0.9 + Math.random() * 0.2);
-    this.enemies.push({ mesh, speed, alive: true, kind, tokens: this.provider.tokensFor(kind) });
+    this.enemies.push({ creature, speed, alive: true, kind, tokens: this.provider.tokensFor(kind) });
     this.redrawUpcoming();
   }
 
@@ -762,8 +767,28 @@ export class Encounter {
     return 'standard';
   }
 
+  private acquireCreature(kind: EnemyKind): Creature {
+    const pooled = this.creaturePool[kind].pop();
+    if (pooled) {
+      pooled.reset();
+      pooled.root.setEnabled(true);
+      return pooled;
+    }
+    return buildCreature(this.scene, kind, {
+      base: this.baseMat(kind),
+      active: this.activeMat,
+      garb: this.garbMat,
+    });
+  }
+
+  private releaseCreature(creature: Creature): void {
+    creature.root.setEnabled(false);
+    creature.setActive(false);
+    this.creaturePool[creature.kind].push(creature);
+  }
+
   private clearEnemies(): void {
-    for (const e of this.enemies) if (e.alive) e.mesh.dispose();
+    for (const e of this.enemies) if (e.alive) this.releaseCreature(e.creature);
     this.enemies.length = 0;
     this.active = null;
   }
@@ -782,7 +807,11 @@ export class Encounter {
   }
 
   private frame(): void {
-    const dt = this.engine3d.getDeltaTime() / 1000;
+    // An occluded window renders no frames, and pause-on-blur never fires if
+    // the window was never focused; the next frame then arrives with the whole
+    // gap as its delta (observed: 62s) and teleports every enemy to the kill
+    // line. Cap the step: a stall loses the stalled time, never the player.
+    const dt = Math.min(this.engine3d.getDeltaTime() / 1000, 0.25);
     const now = performance.now();
 
     const motion = this.effects.motionReduction ? 0.25 : 1;
@@ -799,7 +828,8 @@ export class Encounter {
 
     this.deps.prompt.tick(now);
     if (this.state !== 'running') return;
-    this.activeMs += this.engine3d.getDeltaTime();
+    // Same cap: a stalled frame must not count as a minute of typing time.
+    this.activeMs += dt * 1000;
 
     if (this.spawnEnemies) {
       this.spawnTimer -= dt;
@@ -809,9 +839,11 @@ export class Encounter {
       }
       for (const e of this.enemies) {
         if (!e.alive) continue;
-        e.mesh.position.z += e.speed * dt;
-        e.mesh.position.x += Math.sin(now / 400 + e.mesh.position.z) * 0.15 * dt * motion;
-        if (e.mesh.position.z >= KILL_LINE_Z) {
+        const pos = e.creature.root.position;
+        pos.z += e.speed * dt;
+        pos.x += Math.sin(now / 400 + pos.z) * 0.15 * dt * motion;
+        e.creature.animate(dt, motion);
+        if (pos.z >= KILL_LINE_Z) {
           this.die();
           return;
         }
@@ -825,7 +857,8 @@ export class Encounter {
       // enemy is. An empty room costs nothing; a face full of infected does.
       if (this.mode === 'survival') {
         let nearest = -Infinity;
-        for (const e of this.enemies) if (e.alive && e.mesh.position.z > nearest) nearest = e.mesh.position.z;
+        for (const e of this.enemies)
+          if (e.alive && e.creature.root.position.z > nearest) nearest = e.creature.root.position.z;
         if (nearest > -Infinity) {
           const closeness = (nearest + 38) / (38 + KILL_LINE_Z);
           this.health = Math.max(0, this.health - threatDrainPerS(closeness) * dt);

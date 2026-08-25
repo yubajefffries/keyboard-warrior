@@ -9,6 +9,7 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
         inputFidelity: resolve(__dirname, 'harness/input-fidelity.html'),
         legibility: resolve(__dirname, 'harness/legibility.html'),
+        creatures: resolve(__dirname, 'harness/creatures.html'),
       },
     },
   },
