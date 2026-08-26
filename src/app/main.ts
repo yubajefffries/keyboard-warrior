@@ -14,11 +14,12 @@ import { InputPipeline } from '../input/pipeline';
 import { WeaponAudio } from '../audio/sfx';
 import { FocusTrack } from '../audio/music';
 import { PromptView, escapeHtml } from '../ui/prompt';
-import { FingerHint, KeyboardViz, resolveVisibility } from '../ui/keyboard';
+import { FingerHint } from '../ui/keyboard';
+import { handGuideHtml } from '../ui/handguide';
 import { describeBlocker, renderProgress } from '../ui/progress';
 import { Encounter } from '../game/encounter';
 import { TimedDrill } from '../modes/drill';
-import { absorbSamples, autoKeyboardVisible, gateStatus } from '../profile/mastery';
+import { absorbSamples, gateStatus } from '../profile/mastery';
 import {
   ProfileStore,
   createProfile,
@@ -67,8 +68,7 @@ const store = new ProfileStore();
 const pipeline = new InputPipeline();
 const audio = new WeaponAudio();
 const music = new FocusTrack();
-const prompt = new PromptView({ active: $('prompt'), past: $('promptPast'), next: $('promptNext') });
-const keyboard = new KeyboardViz($('kbviz'));
+const prompt = new PromptView({ active: $('prompt'), next: $('promptNext') });
 const fingerHint = new FingerHint($('fingerHint'));
 
 let profile: Profile | null = null;
@@ -88,16 +88,15 @@ const encounter = new Encounter({
   canvas,
   prompt,
   hud: hudEl,
-  keyboard,
   audio,
   pipeline,
   lookahead,
 });
 
-const drill = new TimedDrill({ prompt, keyboard, pipeline, audio, lookahead }, 'speed_test');
+const drill = new TimedDrill({ prompt, pipeline, audio, lookahead }, 'speed_test');
 /** Warm-ups record as learn: combat and speed-test evidence is preferred by
  *  the mastery engine, and a cold-handed warm-up should not outrank it. */
-const warmupDrill = new TimedDrill({ prompt, keyboard, pipeline, audio, lookahead }, 'learn');
+const warmupDrill = new TimedDrill({ prompt, pipeline, audio, lookahead }, 'learn');
 
 pipeline.onWarnings((w) => {
   const msgs: string[] = [];
@@ -109,32 +108,14 @@ pipeline.onWarnings((w) => {
 pipeline.attach(window);
 
 // ---------- Screen plumbing ----------
-type Chrome = { prompt: boolean; hud: boolean; clock: boolean; keyboard: boolean };
-const NO_CHROME: Chrome = { prompt: false, hud: false, clock: false, keyboard: false };
+type Chrome = { prompt: boolean; hud: boolean; clock: boolean };
+const NO_CHROME: Chrome = { prompt: false, hud: false, clock: false };
 
 function setChrome(chrome: Partial<Chrome>): void {
   const c = { ...NO_CHROME, ...chrome };
   promptRow.style.display = c.prompt ? 'grid' : 'none';
   hudEl.style.display = c.hud ? 'block' : 'none';
   clockEl.style.display = c.clock ? 'block' : 'none';
-  const showKeyboard = c.keyboard && keyboardWanted();
-  keyboard.setVisible(showKeyboard);
-  // The prompt lifts to clear the keyboard; CSS owns how far.
-  document.body.classList.toggle('kb', showKeyboard);
-}
-
-/** Placement forces the keyboard on: we do not yet know who is typing. */
-let forceKeyboard = false;
-
-function keyboardWanted(): boolean {
-  if (forceKeyboard) return true;
-  if (!profile) return false;
-  // Auto asks the mastery engine, which hides the scaffold once every taught
-  // frequent key is mastered and brings it back if one decays.
-  return resolveVisibility(
-    profile.settings.keyboardViz,
-    autoKeyboardVisible(profile, keysTaughtThrough(profile.stage)),
-  );
 }
 
 function showScreen(html: string, opts: { dim?: boolean } = {}): void {
@@ -308,8 +289,7 @@ function runPlacement(): void {
   audio.ensureStarted();
   startFocusTrack();
   hideScreen();
-  forceKeyboard = true;
-  setChrome({ prompt: true, clock: true, keyboard: true });
+  setChrome({ prompt: true, clock: true });
 
   const source = new PlacementSource(Date.now() & 0xffff);
   const scorer = new PlacementScorer();
@@ -319,13 +299,11 @@ function runPlacement(): void {
     onToken: () => source.considerPromotion(scorer.accuracy),
     onTick: (remaining) => setClock(remaining),
     onFinish: (elapsed) => {
-      forceKeyboard = false;
       const score = scorer.score(elapsed, source.reachedWords);
       const route = routeFor(score);
       showPlacementResult(route, score.wpm, score.accuracy, source.reachedWords);
     },
     onAbort: (reason) => {
-      forceKeyboard = false;
       setChrome({});
       music.stop();
       showScreen(`
@@ -349,7 +327,6 @@ function showPlacementResult(route: PlacementRoute, wpm: number, accuracy: numbe
       <p class="lead">${escapeHtml(route.reason)}</p>
       <div class="result-lines">
         <div class="rl"><span>Starting point</span><b>Stage ${route.stage} &middot; ${route.route}</b></div>
-        <div class="rl"><span>On-screen keyboard</span><b>${route.route === 'beginner' ? 'on' : route.route === 'intermediate' ? 'auto' : 'off'}</b></div>
         <div class="rl"><span>Speed Test</span><b>${route.route === 'beginner' ? 'available any time' : 'unlocked'}</b></div>
       </div>
       <div class="rowbtns">
@@ -379,8 +356,6 @@ function applyRoute(
   profile.route = route.route;
   profile.stage = route.stage;
   profile.lesson = 0;
-  profile.settings.keyboardViz =
-    route.route === 'beginner' ? 'on' : route.route === 'intermediate' ? 'auto' : 'off';
   profile.placement = {
     at: new Date().toISOString(),
     route: route.route,
@@ -427,7 +402,7 @@ function showMenu(): void {
           Progress<span class="sub">Every key, every session, and your export</span>
         </button>
         <button id="playSettings" class="ghost">
-          Settings<span class="sub">Keyboard, look-ahead, robot</span>
+          Settings<span class="sub">Look-ahead, audio, robot</span>
         </button>
         <button id="switchProfile" class="ghost">
           Switch profile<span class="sub">${store.count} on this browser</span>
@@ -492,7 +467,7 @@ function runWarmup(): void {
   audio.ensureStarted();
   startFocusTrack();
   hideScreen();
-  setChrome({ prompt: true, clock: true, keyboard: true });
+  setChrome({ prompt: true, clock: true });
 
   // Weak keys first, then whatever the profile has been taught; home row is
   // the floor for a profile with nothing else.
@@ -538,6 +513,9 @@ function startLesson(): void {
       <p class="lead">${escapeHtml(lesson.objective)}</p>
       ${lesson.introduces.length ? `<p>New keys: <b>${lesson.introduces.map((k) => k.toUpperCase()).join('  ')}</b></p>` : ''}
       ${note ? `<p>${escapeHtml(note)}</p>` : ''}
+      ${handGuideHtml(lesson)}
+      <p class="note" style="text-align:center">Fingers rest on the home row &mdash; the bumps are F and J.
+         The glowing fingertip shows which finger reaches for ${lesson.introduces.length ? 'each new key' : "this lesson's keys"}, and it always comes home.</p>
       <p>${lesson.targetTokens} sequences with the ${profile.stage >= 3 ? 'revolver: one word, one shot' : 'pump shotgun'}.
          Wrong key is a dry fire, and the cursor waits: fix it and carry on. Backspace does nothing here.</p>
       <div class="rowbtns">
@@ -555,7 +533,7 @@ function runLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
   audio.ensureStarted();
   startFocusTrack();
   hideScreen();
-  setChrome({ prompt: true, hud: true, keyboard: true });
+  setChrome({ prompt: true, hud: true });
 
   // PRD 16 middle band: Stage 6+ on a non-beginner route drops the buffer to
   // the bottom of the PRD's range. Beginners stay forgiving everywhere.
@@ -583,9 +561,7 @@ function runLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
     },
     onPause: (reason) => showPause(reason),
     onStruggle: (key) => {
-      // Only when the scaffold is off (the answer would already be on screen)
-      // and only when the finger guide is wanted at all.
-      if (!keyboard.shown && profile?.settings.fingerGuide !== 'off') fingerHint.show(key);
+      if (profile?.settings.fingerGuide !== 'off') fingerHint.show(key);
     },
     onBurstReport: (html) => {
       robotPanel.style.display = 'block';
@@ -711,7 +687,7 @@ function gateBlock(gate: ReturnType<typeof gateStatus>): string {
 
 /** PRD 16: death is a checkpoint retry with one diagnosis line, nothing more. */
 function showDeath(diagnosis: string, eased = false): void {
-  setChrome({ prompt: true, hud: true, keyboard: true });
+  setChrome({ prompt: true, hud: true });
   showScreen(
     `<div class="sheet narrow">
       <h1>THEY REACHED YOU</h1>
@@ -777,7 +753,7 @@ function doResume(): void {
   if (encounter.currentState !== 'paused') return;
   audio.ensureStarted();
   hideScreen();
-  setChrome({ prompt: true, hud: true, keyboard: true });
+  setChrome({ prompt: true, hud: true });
   encounter.resume();
 }
 
@@ -820,7 +796,7 @@ function runSurvival(): void {
   audio.ensureStarted();
   startFocusTrack();
   hideScreen();
-  setChrome({ prompt: true, hud: true, keyboard: true });
+  setChrome({ prompt: true, hud: true });
 
   const source = new SurvivalSource(keysTaughtThrough(profile.stage), Date.now() & 0xffff);
   run = { wave: 1, kills: 0, killsThisWave: 0, source };
@@ -847,7 +823,7 @@ function runSurvival(): void {
     onDeath: (reason) => endSurvival(reason),
     onPause: (r) => showPause(r),
     onStruggle: (key) => {
-      if (!keyboard.shown && profile?.settings.fingerGuide !== 'off') fingerHint.show(key);
+      if (profile?.settings.fingerGuide !== 'off') fingerHint.show(key);
     },
     onBurstReport: (html) => {
       robotPanel.style.display = 'block';
@@ -964,7 +940,7 @@ function runSpeedTest(durationS: 15 | 30 | 60 | 120): void {
   audio.ensureStarted();
   startFocusTrack();
   hideScreen();
-  setChrome({ prompt: true, clock: true, keyboard: true });
+  setChrome({ prompt: true, clock: true });
 
   const taught = keysTaughtThrough(profile.stage);
   const scorer = new SpeedTestScorer();
@@ -1125,11 +1101,7 @@ function showSettings(back: () => void): void {
       <p class="sub">${escapeHtml(profile.name)}</p>
       <div class="settings">
         <div class="row">
-          <span>On-screen keyboard</span>
-          ${seg('keyboardViz', ['auto', 'on', 'off'], s.keyboardViz)}
-        </div>
-        <div class="row">
-          <span>Finger guide<span class="keyhint">colours + hints</span></span>
+          <span>Finger hint<span class="keyhint">after repeated misses on one key</span></span>
           ${seg('fingerGuide', ['highlight', 'off'], s.fingerGuide, ['on', 'off'])}
         </div>
         <div class="row">
@@ -1157,7 +1129,7 @@ function showSettings(back: () => void): void {
           ${seg('audioMix', [0, 0.25, 0.5, 0.75, 1], s.audioMix, ['mute', '25', '50', '75', '100'])}
         </div>
         <div class="row">
-          <span>Focus soundtrack<span class="keyhint">binaural beat &mdash; headphones</span></span>
+          <span>Focus soundtrack<span class="keyhint">spooky beat; headphones deepen it</span></span>
           ${seg('focusTrack', ['on', 'off'], s.focusTrack ? 'on' : 'off')}
         </div>
         <div class="row">
@@ -1173,8 +1145,8 @@ function showSettings(back: () => void): void {
           </span>
         </div>
       </div>
-      <p class="note" style="margin-top:16px">Keyboard on Auto follows mastery: it hides once every taught key
-         is solid and returns if one slips. Timed speed tests always discard on focus loss regardless of the
+      <p class="note" style="margin-top:16px">Hand placement is taught before each lesson; in play your eyes
+         belong on the words. Timed speed tests always discard on focus loss regardless of the
          pause setting, because a paused clock makes the number a lie.</p>
       <div class="rowbtns"><button id="settingsBack">Done</button></div>
     </div>`,
@@ -1212,7 +1184,6 @@ function applySettings(): void {
   const s = profile?.settings;
   document.body.classList.toggle('text-large', s?.textSize === 'large');
   document.body.classList.toggle('high-contrast', s?.highContrast === true);
-  keyboard.setFingerGuide(s?.fingerGuide !== 'off');
   audio.setVolume(s?.audioMix ?? 0.5);
   music.setVolume(s?.audioMix ?? 0.5);
   // A toggle from the pause menu applies immediately: the track stops mid-

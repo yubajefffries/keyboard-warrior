@@ -7,14 +7,16 @@
  * this rendering would drift apart.
  *
  * Split into two update paths on purpose. `render` runs per keystroke and
- * touches only the active token. `setUpcoming` / `setCompleted` run per token.
- * At 200 WPM the active token is rewritten ~17 times a second, and the queue
- * must not ride along.
+ * touches only the active token. `setUpcoming` runs per token. At 200 WPM the
+ * active token is rewritten ~17 times a second, and the queue must not ride
+ * along.
+ *
+ * There is no completed-words trail: what has been typed is dead, and Jeff's
+ * verdict was that the eye only ever needs NOW and NEXT.
  */
 
 export interface PromptElements {
   active: HTMLElement;
-  past: HTMLElement;
   next: HTMLElement;
 }
 
@@ -50,14 +52,6 @@ export class PromptView {
       .join('');
   }
 
-  /** Per token: completed words, most recent first. */
-  setCompleted(tokens: string[]): void {
-    this.el.past.innerHTML = tokens
-      .slice(0, 2)
-      .map((t) => `<span>${escapeHtml(t)}</span>`)
-      .join('');
-  }
-
   /** Error state is weight + underline style + icon, never color alone. */
   flashError(now: number, durationMs = 220): void {
     this.errorUntil = now + durationMs;
@@ -77,7 +71,6 @@ export class PromptView {
   clear(): void {
     this.el.active.innerHTML = '';
     this.el.next.innerHTML = '';
-    this.el.past.innerHTML = '';
   }
 }
 

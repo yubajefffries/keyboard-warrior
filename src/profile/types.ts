@@ -63,7 +63,6 @@ export const MAX_SPEED_TEST_HISTORY = 100;
 
 // ---------- Model ----------
 export type Route = 'beginner' | 'intermediate' | 'advanced';
-export type KeyboardVizPref = 'auto' | 'on' | 'off';
 export type Intensity = 'low' | 'full';
 export type KeyState = 'unseen' | 'introduced' | 'practiced' | 'mastered' | 'decayed' | 'unverified';
 
@@ -150,8 +149,10 @@ export interface PlacementResult {
 }
 
 export interface ProfileSettings {
-  keyboardViz: KeyboardVizPref;
-  /** Key Highlighting or Off. Animated Finger and Transparent Hands are Phase 3. PRD 10. */
+  /** The finger hint after repeated misses: on or off. PRD 10. (The
+   *  on-screen keyboard is gone; posture is taught by the lesson-intro hand
+   *  guide instead, so there is no keyboardViz preference any more. Old
+   *  saves carrying one import cleanly: unknown fields are ignored.) */
   fingerGuide: 'highlight' | 'off';
   textSize: 'normal' | 'large';
   highContrast: boolean;
@@ -159,17 +160,15 @@ export interface ProfileSettings {
   motionReduction: boolean;
   /** 0..1, weapon/UI vs atmosphere. PRD 19. */
   audioMix: number;
-  /** The binaural-beat focus soundtrack (audio/music.ts). Headphones. */
+  /** The focus soundtrack (audio/music.ts): spooky beat + binaural layer. */
   focusTrack: boolean;
   pauseOnBlur: boolean;
   /** Words visible ahead of the active prompt. PRD 6. */
   lookahead: number;
 }
 
-export function defaultSettings(route: Route): ProfileSettings {
+export function defaultSettings(): ProfileSettings {
   return {
-    // PRD 3.3: Beginner on, Intermediate auto, Advanced off.
-    keyboardViz: route === 'beginner' ? 'on' : route === 'intermediate' ? 'auto' : 'off',
     fingerGuide: 'highlight',
     textSize: 'normal',
     highContrast: false,

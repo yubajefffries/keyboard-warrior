@@ -35,19 +35,11 @@
       align-items: center; gap: 28px;
       z-index: 10; pointer-events: none; font-family: var(--mono);
     }
-    #promptPast, #promptNext {
+    /* No completed-words trail: the eye only ever needs NOW and NEXT. The
+       empty left grid cell is what keeps the active word dead centre. */
+    #promptNext {
       overflow: hidden; white-space: nowrap; letter-spacing: 0.1em;
       display: flex; gap: 22px; align-items: baseline;
-    }
-    /* Completed words trail left. row-reverse (not direction:rtl, which also
-       flips justify-content) keeps the most recent one beside the prompt. */
-    #promptPast {
-      flex-direction: row-reverse; justify-content: flex-start;
-      font-size: 26px; color: #4d5157;
-      -webkit-mask-image: linear-gradient(to left, #000 72%, transparent 100%);
-      mask-image: linear-gradient(to left, #000 72%, transparent 100%);
-    }
-    #promptNext {
       justify-content: flex-start;
       -webkit-mask-image: linear-gradient(to right, #000 72%, transparent 100%);
       mask-image: linear-gradient(to right, #000 72%, transparent 100%);
@@ -73,43 +65,11 @@
     body.text-large #prompt.long { font-size: 42px; }
     body.text-large #prompt.xlong { font-size: 30px; }
 
-    /*
-      The keyboard is ~230px tall, so the prompt is lifted clear of it in
-      pixels rather than percent: a percentage that clears it at 1080p still
-      collides on a short laptop screen.
-    */
-    body.kb #promptRow { bottom: 268px; }
-
-    /* ---------- On-screen keyboard (PRD 10) ---------- */
-    .kbviz {
-      position: fixed; left: 50%; bottom: 3%; transform: translateX(-50%);
-      display: none; flex-direction: column; gap: 6px; z-index: 10;
-      pointer-events: none; user-select: none;
-    }
-    .kbrow { display: flex; gap: 6px; justify-content: center; }
-    .kbkey {
-      width: 46px; height: 46px; border-radius: 7px;
-      background: rgba(22,23,27,0.9); border: 1px solid #303338;
-      display: flex; align-items: center; justify-content: center;
-      font-family: var(--mono); font-size: 16px; color: #9aa0a6;
-      border-bottom: 3px solid var(--finger, #303338);
-      transition: background 90ms linear, color 90ms linear;
-    }
-    .kbkey.home { color: #d7dadd; background: rgba(30,32,38,0.92); }
-    .kbkey.bump { position: relative; }
-    .kbkey.bump::after {
-      content: ''; position: absolute; bottom: 7px; width: 14px; height: 2px;
-      border-radius: 2px; background: #6c7177;
-    }
-    .kbkey.kbspace { width: 300px; font-size: 12px; letter-spacing: 0.2em; }
-    .kbkey.kbshift { width: 64px; font-size: 18px; }
-    .kbkey.next { color: #d7dadd; box-shadow: inset 0 0 0 1px #3f444b; }
-    .kbkey.target {
-      background: var(--finger, #456); color: #12141a; font-weight: 700;
-      box-shadow: 0 0 0 2px rgba(255,255,255,0.25);
-    }
-    .kbkey.hit { background: #2f5f3a; color: #eaf6ea; }
-    .kbkey.miss { background: #5f2a26; color: #ffdedb; }
+    /* ---------- Hand-placement guide (lesson intro) ---------- */
+    /* The on-screen keyboard scaffold is gone: posture is taught here, before
+       the lesson, while nothing is shooting at you. */
+    .handguide { max-width: 440px; margin: 18px auto 6px; }
+    .handguide svg { width: 100%; height: auto; display: block; }
 
     /* ---------- Settings-driven modes (PRD 21, 22) ---------- */
     /* Large text: the prompt and its queue scale together. */
@@ -118,7 +78,6 @@
     body.text-large #promptNext .q1 { font-size: 38px; }
     body.text-large #promptNext .q2 { font-size: 32px; }
     body.text-large #promptNext .q3 { font-size: 30px; }
-    body.text-large #promptPast { font-size: 32px; }
 
     /* High contrast: solid ground, pure figures, brighter queue. WCAG-minded:
        the error state already never relies on colour alone. */
@@ -127,18 +86,13 @@
     body.high-contrast #promptNext .q0 { color: #fff; }
     body.high-contrast #promptNext .q1 { color: #d0d4d8; }
     body.high-contrast #promptNext .q2, body.high-contrast #promptNext .q3 { color: #aab0b6; }
-    body.high-contrast #promptPast { color: #8a9096; }
     body.high-contrast #hud, body.high-contrast #clock { background: #000; color: #fff; }
 
-    /* Finger guide off: the keyboard stays a key map, the fingers stay yours. */
-    .kbviz.noguide .kbkey { border-bottom-color: #303338; }
-    .kbviz.noguide .kbkey.target { background: #d7dadd; color: #12141a; box-shadow: 0 0 0 2px rgba(255,255,255,0.25); }
-
     /*
-      Finger hint. Appears above the prompt only when the keyboard is hidden
-      and the same key has been missed several times. Names the finger, never
-      the location: pointing at the screen would rebuild the habit of looking
-      down that hiding the keyboard exists to break.
+      Finger hint. Appears above the prompt when the same key has been missed
+      several times. Names the finger, never the location: pointing at the
+      screen would rebuild the habit of looking down that touch typing exists
+      to break.
     */
     .fingerhint {
       position: fixed; left: 50%; bottom: 14%; transform: translateX(-50%) translateY(6px);
@@ -354,12 +308,11 @@
   <canvas id="renderCanvas"></canvas>
 
   <div id="promptRow">
-    <div id="promptPast" aria-hidden="true"></div>
+    <div aria-hidden="true"></div>
     <div id="prompt" aria-live="polite"></div>
     <div id="promptNext" aria-hidden="true"></div>
   </div>
 
-  <div id="kbviz" class="kbviz"></div>
   <div id="fingerHint" class="fingerhint"></div>
   <div id="hud"></div>
   <div id="clock"></div>

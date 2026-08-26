@@ -82,7 +82,7 @@ describe('profile export/import (PRD 21)', () => {
       delete (p.profiles as Record<string, unknown>[])[0].settings;
     });
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.profiles[0].settings.keyboardViz).toBe('on'); // beginner default
+    if (result.ok) expect(result.profiles[0].settings.fingerGuide).toBe('highlight'); // default
   });
 
   it('clamps hand-edited settings into range', () => {
@@ -330,16 +330,17 @@ describe('hostile save files', () => {
   it('normalizes enum settings a hand-edited file corrupted', () => {
     const result = roundTrip((p) => {
       (p.profiles as Record<string, unknown>[])[0].settings = {
-        keyboardViz: 'banana', fingerGuide: 'laser', textSize: 'enormous', intensity: 'extreme',
+        fingerGuide: 'laser', textSize: 'enormous', intensity: 'extreme',
+        keyboardViz: 'banana', // a retired field: ignored, never imported
       };
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
       const s = result.profiles[0].settings;
-      expect(s.keyboardViz).toBe('on'); // beginner default
       expect(s.fingerGuide).toBe('highlight');
       expect(s.textSize).toBe('normal');
       expect(s.intensity).toBe('full');
+      expect('keyboardViz' in s).toBe(false);
     }
   });
 

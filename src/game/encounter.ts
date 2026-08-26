@@ -44,7 +44,6 @@ import {
   threatDrainPerS,
 } from '../modes/survival';
 import type { PromptView } from '../ui/prompt';
-import type { KeyboardViz } from '../ui/keyboard';
 import { RobotTypist, judgeBurst, type RobotReport } from '../dev/robot';
 
 export type EncounterState = 'idle' | 'running' | 'paused' | 'dead';
@@ -53,7 +52,6 @@ export interface EncounterDeps {
   canvas: HTMLCanvasElement;
   prompt: PromptView;
   hud: HTMLElement;
-  keyboard: KeyboardViz | null;
   audio: WeaponAudio;
   pipeline: InputPipeline;
   /** Read fresh every token so a settings change applies immediately. */
@@ -76,8 +74,8 @@ export interface EncounterCallbacks {
   onKill?: (kind: EnemyKind) => void;
   /**
    * The same key has been missed several times running. The app decides
-   * whether to surface a finger hint, since only it knows whether the
-   * keyboard is currently on screen.
+   * whether to surface a finger hint, since only it knows the player's
+   * finger-guide preference.
    */
   onStruggle?: (key: string) => void;
   onTokenComplete?: (token: string, completed: number, tokenAccuracy: number) => void;
@@ -192,7 +190,14 @@ export class Encounter {
   private scorer = new Scorer();
   private shotsFired = 0;
   private typing: TypingEngine;
-  private completed: string[] = [];
+  /**
+   * Enemies rolled ahead of their spawn so the look-ahead is never empty:
+   * when the walking world holds fewer upcoming words than the player wants
+   * to read, the queue is topped up from here, and spawn() consumes it in
+   * order. The promise "what you see coming is what arrives" holds either
+   * way -- these ARE the next arrivals.
+   */
+  private pending: { kind: EnemyKind; tokens: string[] }[] = [];
   private tokensCompleted = 0;
   private correctChars = 0;
   private missCount = 0;
@@ -335,13 +340,12 @@ export class Encounter {
         this.correctChars += 1;
         const combo = this.scorer.hit();
         if (combo.tierUp) this.pulseHud();
-        this.deps.keyboard?.flash(char, 'hit');
         // A clean press clears the struggle: the hint is for a key that is
         // genuinely lost, not for one fumbled once.
         if (this.struggleKey === char) this.resetStruggle();
         this.redrawActive();
       },
-      onMiss: (expected, pressed) => {
+      onMiss: (expected) => {
         deps.audio.dryFire();
         this.missCount += 1;
         this.scorer.miss();
@@ -349,7 +353,6 @@ export class Encounter {
         if (this.mode === 'survival') this.health = Math.max(0, this.health - MISS_DRAIN);
         this.bump(expected, false);
         this.deps.prompt.flashError(performance.now());
-        this.deps.keyboard?.flash(pressed, 'miss');
         this.noteStruggle(expected);
         this.redrawActive();
       },
@@ -359,8 +362,6 @@ export class Encounter {
         const combo = this.scorer.hit();
         if (combo.tierUp) this.pulseHud();
         this.scorer.word(token);
-        this.completed.unshift(token);
-        if (this.completed.length > 4) this.completed.pop();
         this.tokensCompleted += 1;
 
         // One token, one shot. Whether it kills depends on who carried it:
@@ -461,7 +462,7 @@ export class Encounter {
     this.scorer = new Scorer();
     this.shotsFired = 0;
     this.clearEnemies();
-    this.completed = [];
+    this.pending = []; // a new source: pre-rolled arrivals from the old one are void
     this.attempts = new Map();
     this.tokensCompleted = 0;
     this.correctChars = 0;
@@ -563,7 +564,7 @@ export class Encounter {
   retry(): void {
     this.clearEnemies();
     this.attempts = new Map();
-    this.completed = [];
+    this.pending = [];
     this.state = 'running';
     this.typing.setEnabled(true);
     this.spawn();
@@ -698,7 +699,6 @@ export class Encounter {
         this.typing.setToken('');
         this.deps.prompt.render('', 0);
         this.deps.prompt.setUpcoming([]);
-        this.deps.keyboard?.setTarget(null);
         return;
       }
     }
@@ -720,17 +720,15 @@ export class Encounter {
 
   private redrawActive(): void {
     this.deps.prompt.render(this.typing.currentToken, this.typing.typedCount);
-    const token = this.typing.currentToken;
-    this.deps.keyboard?.setTarget(
-      token[this.typing.typedCount] ?? null,
-      token[this.typing.typedCount + 1] ?? this.upcomingTokens(1)[0]?.[0] ?? null,
-    );
   }
 
   /**
-   * The look-ahead is the world now: the rest of the active enemy's words,
-   * then the other enemies' words in threat order. What is drawn as coming is
-   * what is actually walking toward you.
+   * The look-ahead is the world: the rest of the active enemy's words, then
+   * the other enemies' words in threat order -- and when the walking world
+   * runs shorter than the player's look-ahead, the pending queue rolls the
+   * NEXT arrivals early and shows their words. Either way, what is drawn as
+   * coming is what actually arrives (Jeff's fix request 2026-08-26: the
+   * queue must never sit empty while more enemies are on the way).
    */
   private upcomingTokens(count: number): string[] {
     if (count <= 0 || !this.active) return [];
@@ -739,12 +737,26 @@ export class Encounter {
       .filter((e) => e.alive && e !== this.active)
       .sort((a, b) => b.creature.root.position.z - a.creature.root.position.z);
     for (const e of others) out.push(...e.tokens);
+    if (out.length < count && this.spawnEnemies && this.provider) {
+      this.ensurePending(count - out.length);
+      for (const p of this.pending) out.push(...p.tokens);
+    }
     return out.slice(0, count);
+  }
+
+  /** Pre-roll future spawns until they cover `tokensNeeded` more words. */
+  private ensurePending(tokensNeeded: number): void {
+    let have = this.pending.reduce((a, p) => a + p.tokens.length, 0);
+    while (have < tokensNeeded && this.pending.length < MAX_RENDERED) {
+      const kind = this.rollKind();
+      const tokens = this.provider!.tokensFor(kind);
+      this.pending.push({ kind, tokens });
+      have += tokens.length;
+    }
   }
 
   private redrawUpcoming(): void {
     this.deps.prompt.setUpcoming(this.upcomingTokens(this.deps.lookahead()));
-    this.deps.prompt.setCompleted(this.completed);
   }
 
   /** Where a shot lands on this enemy: center mass in world space. */
@@ -802,14 +814,17 @@ export class Encounter {
     if (!this.spawnEnemies || !this.provider) return;
     if (this.enemies.filter((e) => e.alive).length >= MAX_RENDERED) return;
 
-    const kind = this.rollKind();
+    // The pending queue spawns in the order its words were shown; only when
+    // it is empty is a fresh enemy rolled on the spot.
+    const next = this.pending.shift() ?? { kind: this.rollKind(), tokens: null };
+    const kind = next.kind;
     const creature = this.acquireCreature(kind);
     creature.root.position.set((Math.random() - 0.5) * 7, 0, -34 - Math.random() * 4);
     // Walk time comes from the pacing model; +/-10% so a group still shambles
     // rather than marching. Kind multipliers are what make a crawler a crawler.
     const speed =
       (MEAN_TRAVEL_UNITS / this.pacing.walkTimeS) * KIND_SPEED[kind] * (0.9 + Math.random() * 0.2);
-    const tokens = this.provider.tokensFor(kind);
+    const tokens = next.tokens ?? this.provider.tokensFor(kind);
     this.enemies.push({ creature, speed, alive: true, kind, tokens, totalTokens: tokens.length });
     this.redrawUpcoming();
   }
@@ -817,7 +832,10 @@ export class Encounter {
   private rollKind(): EnemyKind {
     if (!this.variety) return 'standard';
     const r = Math.random();
-    const bruteAlive = this.enemies.some((e) => e.alive && e.kind === 'brute');
+    // At most one brute at a time -- walking OR already promised in pending.
+    const bruteAlive =
+      this.enemies.some((e) => e.alive && e.kind === 'brute') ||
+      this.pending.some((p) => p.kind === 'brute');
     if (!bruteAlive && r < this.bruteChance) return 'brute';
     if (r < this.bruteChance + this.crawlerChance) return 'crawler';
     return 'standard';

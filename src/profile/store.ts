@@ -69,7 +69,7 @@ export function createProfile(name: string, route: Route = 'beginner'): Profile 
     stage: route === 'beginner' ? 1 : route === 'intermediate' ? 3 : 5,
     lesson: 0,
     stagesCleared: [],
-    settings: defaultSettings(route),
+    settings: defaultSettings(),
     keys: emptyKeyTable(),
     keyStates: {},
     sessions: [],

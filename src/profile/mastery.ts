@@ -1,7 +1,7 @@
 /**
  * Mastery engine. PRD Sections 10, 12.
  *
- * Gates progression and keyboard auto-hide. Every rule here is about a
+ * Gates progression. Every rule here is about a
  * WINDOW, never about all time: a player who was 60% on K for a month and is
  * 98% today has mastered K, and a lifetime average would say otherwise for
  * weeks. So each key carries the last MASTERY_WINDOW outcomes and intervals,
@@ -440,22 +440,6 @@ export function gateStatus(profile: Profile, taught: Iterable<string>, now = new
   }
   blocking.sort((a, b) => a.accuracy - b.accuracy);
   return { ready: blocking.length === 0, blocking, waived };
-}
-
-/**
- * PRD 10: auto-hide once every taught, frequent key is mastered. Until there
- * is enough evidence to say that, fall back to the placement route, which is
- * the same signal that set the default in the first place.
- */
-export function autoKeyboardVisible(profile: Profile, taught: Iterable<string>): boolean {
-  // Judge only real keys: shifted chords are seldom individually judged and
-  // would otherwise hold the scaffold on screen forever from Stage 6 on.
-  const keys = [...taught].filter((k) => !isShiftedChar(k));
-  const judged = keys.filter((k) => windowPresses(mergedAggregate(profile, k)) >= MASTERY_MIN_SAMPLES);
-  if (judged.length === 0 || judged.length < keys.length / 2) {
-    return profile.route === 'beginner';
-  }
-  return !gateStatus(profile, keys).ready;
 }
 
 /**

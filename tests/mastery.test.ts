@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   FINGER_OF,
   absorbSamples,
-  autoKeyboardVisible,
   evaluateState,
   gateStatus,
   isLowExposure,
@@ -252,39 +251,6 @@ describe('stage gate (PRD 12)', () => {
     for (const k of TAUGHT) masterKey(p, k);
     p.keyStates['f'] = 'unverified';
     expect(gateStatus(p, TAUGHT, NOW).ready).toBe(true);
-  });
-});
-
-describe('keyboard auto-hide (PRD 10)', () => {
-  const TAUGHT = ['a', 's', 'd', 'f', 'j', 'k', 'l', ';'];
-
-  it('follows the placement route until there is evidence', () => {
-    const beginner = createProfile('B', 'beginner');
-    const advanced = createProfile('A', 'advanced');
-    expect(autoKeyboardVisible(beginner, TAUGHT)).toBe(true);
-    expect(autoKeyboardVisible(advanced, TAUGHT)).toBe(false);
-  });
-
-  it('hides once every taught frequent key is mastered', () => {
-    const p = createProfile('B', 'beginner');
-    for (const k of TAUGHT) masterKey(p, k);
-    expect(autoKeyboardVisible(p, TAUGHT)).toBe(false);
-  });
-
-  it('stays up while a key is still unmastered', () => {
-    const p = createProfile('B', 'beginner');
-    for (const k of TAUGHT) masterKey(p, k);
-    absorbSamples(p, samples('l', 40, { correct: false }), { now: NOW, sessionId: 's3' });
-    expect(autoKeyboardVisible(p, TAUGHT)).toBe(true);
-  });
-
-  it('comes back up when a mastered key decays', () => {
-    const p = createProfile('B', 'beginner');
-    for (const k of TAUGHT) masterKey(p, k);
-    expect(autoKeyboardVisible(p, TAUGHT)).toBe(false);
-    absorbSamples(p, samples('d', 40, { correct: false }), { now: NOW, sessionId: 's4' });
-    expect(p.keyStates['d']).toBe('decayed');
-    expect(autoKeyboardVisible(p, TAUGHT)).toBe(true);
   });
 });
 

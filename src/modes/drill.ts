@@ -14,12 +14,10 @@ import { StatsTracker, type StatContext } from '../stats/keystats';
 import { TokenQueue, type TokenSource } from '../content/sequences';
 import type { InputPipeline } from '../input/pipeline';
 import type { PromptView } from '../ui/prompt';
-import type { KeyboardViz } from '../ui/keyboard';
 import type { WeaponAudio } from '../audio/sfx';
 
 export interface DrillDeps {
   prompt: PromptView;
-  keyboard: KeyboardViz | null;
   pipeline: InputPipeline;
   audio: WeaponAudio | null;
   lookahead: () => number;
@@ -42,7 +40,6 @@ export class TimedDrill {
   private hooks: DrillHooks = {};
   private typing: TypingEngine;
   private queue: TokenQueue | null = null;
-  private completed: string[] = [];
   private tokensCompleted = 0;
   private startedAt = 0;
   private durationMs = 0;
@@ -60,20 +57,16 @@ export class TimedDrill {
       this.tracker,
       {
         onPress: (pressed, expected, correct) => this.hooks.onPress?.(pressed, expected, correct),
-        onHit: (char) => {
+        onHit: () => {
           this.deps.audio?.tick();
-          this.deps.keyboard?.flash(char, 'hit');
           this.redrawActive();
         },
-        onMiss: (_expected, pressed) => {
+        onMiss: () => {
           this.deps.audio?.dryFire();
           this.deps.prompt.flashError(performance.now());
-          this.deps.keyboard?.flash(pressed, 'miss');
           this.redrawActive();
         },
         onComplete: (token) => {
-          this.completed.unshift(token);
-          if (this.completed.length > 4) this.completed.pop();
           this.tokensCompleted += 1;
           this.hooks.onToken?.(token, this.tokensCompleted);
           this.advance();
@@ -109,7 +102,6 @@ export class TimedDrill {
     this.tracker = new StatsTracker();
     this.typing.setStats(this.tracker);
     this.queue = new TokenQueue(source, 4);
-    this.completed = [];
     this.tokensCompleted = 0;
     this.durationMs = durationMs;
     this.startedAt = performance.now();
@@ -145,7 +137,6 @@ export class TimedDrill {
     this.typing.setEnabled(false);
     if (this.timer !== null) clearInterval(this.timer);
     this.timer = null;
-    this.deps.keyboard?.setTarget(null);
   }
 
   /** The source may want to change what it serves as the drill progresses. */
@@ -164,16 +155,11 @@ export class TimedDrill {
     this.typing.markTokenShown(performance.now());
     this.redrawActive();
     this.deps.prompt.setUpcoming(this.queue?.upcoming(this.deps.lookahead()) ?? []);
-    this.deps.prompt.setCompleted(this.completed);
   }
 
   private redrawActive(): void {
     const token = this.typing.currentToken;
     this.deps.prompt.render(token, this.typing.typedCount);
     this.deps.prompt.tick(performance.now());
-    this.deps.keyboard?.setTarget(
-      token[this.typing.typedCount] ?? null,
-      token[this.typing.typedCount + 1] ?? this.queue?.upcoming(1)[0]?.[0] ?? null,
-    );
   }
 }

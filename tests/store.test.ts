@@ -89,12 +89,6 @@ describe('profile creation', () => {
     expect(createProfile('a', 'advanced').stage).toBe(5);
   });
 
-  it('defaults the keyboard the way PRD 3.3 routes it', () => {
-    expect(createProfile('a', 'beginner').settings.keyboardViz).toBe('on');
-    expect(createProfile('a', 'intermediate').settings.keyboardViz).toBe('auto');
-    expect(createProfile('a', 'advanced').settings.keyboardViz).toBe('off');
-  });
-
   it('gives every profile a distinct id', () => {
     const ids = new Set(Array.from({ length: 200 }, () => createProfile('x').id));
     expect(ids.size).toBe(200);

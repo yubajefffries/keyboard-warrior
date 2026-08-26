@@ -286,7 +286,7 @@ export function validateProfile(input: unknown): ProfileResult {
     stagesCleared: Array.isArray(input.stagesCleared)
       ? input.stagesCleared.filter((n): n is number => typeof n === 'number')
       : [],
-    settings: mergeSettings(input.settings, route),
+    settings: mergeSettings(input.settings),
     keys: keys.value,
     keyStates: validateKeyStates(input.keyStates),
     // History rows are rebuilt field by field: they feed straight into HTML
@@ -357,10 +357,12 @@ function validateKeyStates(input: unknown): Record<string, KeyState> {
   return out;
 }
 
-function mergeSettings(input: unknown, route: Route): ProfileSettings {
-  const base = defaultSettings(route);
+function mergeSettings(input: unknown): ProfileSettings {
+  const base = defaultSettings();
   if (!isPlainObject(input)) return base;
   const merged = { ...base };
+  // Only keys the current schema knows are read; anything else in an old or
+  // hand-edited save (keyboardViz, say) is silently ignored.
   for (const key of Object.keys(base) as (keyof ProfileSettings)[]) {
     const v = input[key];
     if (typeof v === typeof base[key]) (merged as Record<string, unknown>)[key] = v;
@@ -369,7 +371,6 @@ function mergeSettings(input: unknown, route: Route): ProfileSettings {
   merged.audioMix = Math.min(1, Math.max(0, merged.audioMix));
   // Enum fields: a typeof check alone would wave through any string a
   // hand-edited file put there, and the UI renders these into class names.
-  if (!['auto', 'on', 'off'].includes(merged.keyboardViz)) merged.keyboardViz = base.keyboardViz;
   if (!['highlight', 'off'].includes(merged.fingerGuide)) merged.fingerGuide = base.fingerGuide;
   if (!['normal', 'large'].includes(merged.textSize)) merged.textSize = base.textSize;
   if (!['low', 'full'].includes(merged.intensity)) merged.intensity = base.intensity;
