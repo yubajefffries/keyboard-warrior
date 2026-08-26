@@ -25,7 +25,13 @@ import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 
 import type { InputPipeline } from '../input/pipeline';
 import { TypingEngine } from './engine';
-import { buildCreature, makeGarbMaterial, type Creature } from './creatures';
+import {
+  applyCreatureIntensity,
+  buildCreature,
+  makeCreatureMaterialSet,
+  type Creature,
+  type CreatureMaterialSet,
+} from './creatures';
 import { StatsTracker } from '../stats/keystats';
 import type { WeaponAudio } from '../audio/sfx';
 import { Scorer, type EnemyKind, type ScoreBreakdown } from './scoring';
@@ -141,11 +147,7 @@ export class Encounter {
   private gunRoot: TransformNode;
   private pumpGrip: Mesh;
   private muzzle: PointLight;
-  private enemyMat: StandardMaterial;
-  private crawlerMat: StandardMaterial;
-  private bruteMat: StandardMaterial;
-  private activeMat: StandardMaterial;
-  private garbMat: StandardMaterial;
+  private creatureMats: CreatureMaterialSet;
   private shotgunNode: TransformNode;
   private revolverNode: TransformNode;
   private cylinderMesh: Mesh;
@@ -279,20 +281,7 @@ export class Encounter {
     this.muzzle.diffuse = new Color3(1, 0.7, 0.3);
     this.muzzle.intensity = 0;
 
-    this.enemyMat = new StandardMaterial('enemyMat', this.scene);
-    this.enemyMat.diffuseColor = new Color3(0.45, 0.28, 0.28);
-    this.enemyMat.specularColor = Color3.Black();
-    this.activeMat = new StandardMaterial('activeMat', this.scene);
-    this.activeMat.diffuseColor = new Color3(0.55, 0.3, 0.3);
-    this.activeMat.emissiveColor = new Color3(0.45, 0.08, 0.08);
-    this.activeMat.specularColor = Color3.Black();
-    this.crawlerMat = new StandardMaterial('crawlerMat', this.scene);
-    this.crawlerMat.diffuseColor = new Color3(0.42, 0.38, 0.26);
-    this.crawlerMat.specularColor = Color3.Black();
-    this.bruteMat = new StandardMaterial('bruteMat', this.scene);
-    this.bruteMat.diffuseColor = new Color3(0.3, 0.25, 0.33);
-    this.bruteMat.specularColor = Color3.Black();
-    this.garbMat = makeGarbMaterial(this.scene);
+    this.creatureMats = makeCreatureMaterialSet(this.scene);
 
     this.typing = new TypingEngine(this.tracker, {
       onPress: (pressed) => {
@@ -521,10 +510,8 @@ export class Encounter {
   setEffects(effects: EffectSettings): void {
     this.effects = effects;
     const low = effects.intensity === 'low';
-    // Low intensity: enemies read as dark silhouettes, no red glow.
-    this.activeMat.emissiveColor = low ? new Color3(0.1, 0.02, 0.02) : new Color3(0.45, 0.08, 0.08);
-    this.activeMat.diffuseColor = low ? new Color3(0.3, 0.22, 0.22) : new Color3(0.55, 0.3, 0.3);
-    this.enemyMat.diffuseColor = low ? new Color3(0.28, 0.24, 0.24) : new Color3(0.45, 0.28, 0.28);
+    // Low intensity: enemies read as dark silhouettes, no red glow, eyes out.
+    applyCreatureIntensity(this.creatureMats, low);
     if (low) this.muzzle.intensity = 0;
   }
 
@@ -687,10 +674,6 @@ export class Encounter {
     this.redrawUpcoming();
   }
 
-  private baseMat(kind: EnemyKind): StandardMaterial {
-    return kind === 'crawler' ? this.crawlerMat : kind === 'brute' ? this.bruteMat : this.enemyMat;
-  }
-
   private redrawActive(): void {
     this.deps.prompt.render(this.typing.currentToken, this.typing.typedCount);
     const token = this.typing.currentToken;
@@ -774,11 +757,7 @@ export class Encounter {
       pooled.root.setEnabled(true);
       return pooled;
     }
-    return buildCreature(this.scene, kind, {
-      base: this.baseMat(kind),
-      active: this.activeMat,
-      garb: this.garbMat,
-    });
+    return buildCreature(this.scene, kind, this.creatureMats);
   }
 
   private releaseCreature(creature: Creature): void {

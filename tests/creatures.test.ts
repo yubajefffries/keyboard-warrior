@@ -3,28 +3,28 @@
  *
  * These run against Babylon's NullEngine: no canvas, no GPU, real scene
  * graph. They pin the contract the encounter relies on -- active-target
- * highlighting, disposal, stable animation -- not how the monsters look.
- * The look is judged by Jeff in a browser, like every art call.
+ * highlighting, disposal, stable animation, intensity repaint -- not how
+ * the monsters look. The look is judged by Jeff in a browser (the
+ * /harness/creatures.html viewer), like every art call.
  */
 import { describe, it, expect } from 'vitest';
 import { NullEngine } from '@babylonjs/core/Engines/nullEngine';
 import { Scene } from '@babylonjs/core/scene';
-import { Color3 } from '@babylonjs/core/Maths/math.color';
-import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
-import { buildCreature, makeGarbMaterial, type CreatureMaterials } from '../src/game/creatures';
+import {
+  applyCreatureIntensity,
+  buildCreature,
+  makeCreatureMaterialSet,
+  type CreatureMaterialSet,
+} from '../src/game/creatures';
 import type { EnemyKind } from '../src/game/scoring';
 
 const KINDS: EnemyKind[] = ['standard', 'crawler', 'brute'];
 
-function setup(): { scene: Scene; mats: CreatureMaterials } {
+function setup(): { scene: Scene; mats: CreatureMaterialSet } {
   const engine = new NullEngine();
   const scene = new Scene(engine);
-  const base = new StandardMaterial('base', scene);
-  base.diffuseColor = new Color3(0.4, 0.3, 0.3);
-  const active = new StandardMaterial('active', scene);
-  active.emissiveColor = new Color3(0.45, 0.08, 0.08);
-  return { scene, mats: { base, active, garb: makeGarbMaterial(scene) } };
+  return { scene, mats: makeCreatureMaterialSet(scene) };
 }
 
 function partsOf(scene: Scene, root: { name: string }): Mesh[] {
@@ -39,14 +39,16 @@ function partsOf(scene: Scene, root: { name: string }): Mesh[] {
 }
 
 describe('creature construction', () => {
-  it('every kind builds a multi-part body with flesh and garb, nothing pickable', () => {
+  it('every kind has flesh, garb, gore, and glowing eyes; nothing pickable', () => {
     for (const kind of KINDS) {
       const { scene, mats } = setup();
       const c = buildCreature(scene, kind, mats);
       const parts = partsOf(scene, c.root);
-      expect(parts.length, kind).toBeGreaterThanOrEqual(6);
-      expect(parts.some((m) => m.material === mats.base), `${kind} flesh`).toBe(true);
+      expect(parts.length, kind).toBeGreaterThanOrEqual(10);
+      expect(parts.some((m) => m.material === mats[kind]), `${kind} flesh`).toBe(true);
       expect(parts.some((m) => m.material === mats.garb), `${kind} garb`).toBe(true);
+      expect(parts.some((m) => m.material === mats.gore), `${kind} gore`).toBe(true);
+      expect(parts.filter((m) => m.material === mats.eye).length, `${kind} eyes`).toBe(2);
       expect(parts.every((m) => !m.isPickable), `${kind} pickable`).toBe(true);
     }
   });
@@ -72,19 +74,23 @@ describe('creature construction', () => {
 });
 
 describe('active-target highlight (PRD 6)', () => {
-  it('setActive swaps flesh to the active material and back, garb untouched', () => {
+  it('setActive swaps flesh to the active material and back; garb, gore, eyes untouched', () => {
     const { scene, mats } = setup();
     const c = buildCreature(scene, 'standard', mats);
     const parts = partsOf(scene, c.root);
-    const fleshCount = parts.filter((m) => m.material === mats.base).length;
-    const garbCount = parts.filter((m) => m.material === mats.garb).length;
+    const fleshCount = parts.filter((m) => m.material === mats.standard).length;
+    const fixedCount = parts.filter(
+      (m) => m.material === mats.garb || m.material === mats.gore || m.material === mats.eye,
+    ).length;
 
     c.setActive(true);
     expect(parts.filter((m) => m.material === mats.active).length).toBe(fleshCount);
-    expect(parts.filter((m) => m.material === mats.garb).length).toBe(garbCount);
+    expect(
+      parts.filter((m) => m.material === mats.garb || m.material === mats.gore || m.material === mats.eye).length,
+    ).toBe(fixedCount);
 
     c.setActive(false);
-    expect(parts.filter((m) => m.material === mats.base).length).toBe(fleshCount);
+    expect(parts.filter((m) => m.material === mats.standard).length).toBe(fleshCount);
     expect(parts.filter((m) => m.material === mats.active).length).toBe(0);
   });
 
@@ -92,12 +98,31 @@ describe('active-target highlight (PRD 6)', () => {
     const { scene, mats } = setup();
     const c = buildCreature(scene, 'brute', mats);
     const parts = partsOf(scene, c.root);
-    const fleshCount = parts.filter((m) => m.material === mats.base).length;
+    const fleshCount = parts.filter((m) => m.material === mats.brute).length;
     c.setActive(true);
     c.stagger();
     c.reset();
-    expect(parts.filter((m) => m.material === mats.base).length).toBe(fleshCount);
+    expect(parts.filter((m) => m.material === mats.brute).length).toBe(fleshCount);
     expect(parts.filter((m) => m.material === mats.active).length).toBe(0);
+  });
+});
+
+describe('intensity (PRD 21/22)', () => {
+  it('low intensity dims skin, target glow, and the ember eyes; full restores them', () => {
+    const { mats } = setup();
+    const fullEye = mats.eye.emissiveColor.clone();
+    const fullSkin = mats.standard.diffuseColor.clone();
+    const fullGlow = mats.active.emissiveColor.clone();
+
+    applyCreatureIntensity(mats, true);
+    expect(mats.eye.emissiveColor.r).toBeLessThan(fullEye.r / 5);
+    expect(mats.standard.diffuseColor.g).toBeLessThan(fullSkin.g);
+    expect(mats.active.emissiveColor.r).toBeLessThan(fullGlow.r);
+
+    applyCreatureIntensity(mats, false);
+    expect(mats.eye.emissiveColor.r).toBeCloseTo(fullEye.r);
+    expect(mats.standard.diffuseColor.g).toBeCloseTo(fullSkin.g);
+    expect(mats.active.emissiveColor.r).toBeCloseTo(fullGlow.r);
   });
 });
 
@@ -157,8 +182,9 @@ describe('disposal', () => {
     expect(scene.meshes.length).toBeGreaterThan(before);
     c.dispose();
     expect(scene.meshes.length).toBe(before);
-    expect(scene.materials).toContain(mats.base);
+    expect(scene.materials).toContain(mats.brute);
     expect(scene.materials).toContain(mats.active);
     expect(scene.materials).toContain(mats.garb);
+    expect(scene.materials).toContain(mats.eye);
   });
 });
