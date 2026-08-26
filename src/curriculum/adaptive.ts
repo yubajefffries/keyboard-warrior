@@ -102,17 +102,17 @@ export class AdaptiveSource implements TokenSource {
   }
 
   /**
-   * Tokens sized to the enemy that will carry them. PRD 14: crawlers take
-   * very short targets (recognition speed), brutes take several longer words
-   * (staying power). Weak-key and low-exposure logic still applies inside
-   * each slice; the length filter falls back to the whole pool rather than
-   * ever serving nothing.
+   * Tokens sized to the enemy that will carry them. PRD 14: spider drones
+   * take one very short target (recognition speed), hounds take two normal
+   * words, mechs take three longer words (staying power). Weak-key and
+   * low-exposure logic still applies inside each slice; the length filter
+   * falls back to the whole pool rather than ever serving nothing.
    */
   tokensFor(kind: EnemyKind): string[] {
     if (kind === 'crawler') {
       // Very short targets. In sentence stages nothing is <= 3 characters,
       // so fall back to the shortest tokens the pool has rather than handing
-      // a crawler a whole transmission.
+      // a spider a whole transmission.
       const lengths = [...new Set(this.candidates.map((c) => c.token.length))].sort((a, b) => a - b);
       const cutoff = Math.max(3, lengths[0] ?? 3);
       return [this.drawWhere((t) => t.length <= cutoff)];
@@ -124,7 +124,8 @@ export class AdaptiveSource implements TokenSource {
         this.drawWhere((t) => t.length >= 5),
       ];
     }
-    return [this.next()];
+    // The hound: two words from the normal adaptive flow.
+    return [this.next(), this.next()];
   }
 
   /** One token from the normal adaptive flow, restricted by a predicate. */

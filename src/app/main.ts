@@ -12,6 +12,7 @@
 
 import { InputPipeline } from '../input/pipeline';
 import { WeaponAudio } from '../audio/sfx';
+import { FocusTrack } from '../audio/music';
 import { PromptView, escapeHtml } from '../ui/prompt';
 import { FingerHint, KeyboardViz, resolveVisibility } from '../ui/keyboard';
 import { describeBlocker, renderProgress } from '../ui/progress';
@@ -65,6 +66,7 @@ const promptRow = $('promptRow');
 const store = new ProfileStore();
 const pipeline = new InputPipeline();
 const audio = new WeaponAudio();
+const music = new FocusTrack();
 const prompt = new PromptView({ active: $('prompt'), past: $('promptPast'), next: $('promptNext') });
 const keyboard = new KeyboardViz($('kbviz'));
 const fingerHint = new FingerHint($('fingerHint'));
@@ -72,6 +74,15 @@ const fingerHint = new FingerHint($('fingerHint'));
 let profile: Profile | null = null;
 
 const lookahead = () => profile?.settings.lookahead ?? 3;
+
+/**
+ * The focus track runs under live runs (lessons, survival, timed drills) the
+ * way Doom and Quake run music under the action, and goes quiet on menus.
+ * Callers invoke this from a user gesture, which WebAudio requires anyway.
+ */
+function startFocusTrack(): void {
+  if (profile?.settings.focusTrack !== false) music.start();
+}
 
 const encounter = new Encounter({
   canvas,
@@ -149,6 +160,7 @@ function save(): void {
 // ---------- Profiles ----------
 function showProfiles(): void {
   setChrome({});
+  music.stop();
   robotPanel.style.display = 'none';
   const profiles = store.list();
   const rows = profiles
@@ -294,6 +306,7 @@ function showPlacementIntro(): void {
 function runPlacement(): void {
   if (!profile) return;
   audio.ensureStarted();
+  startFocusTrack();
   hideScreen();
   forceKeyboard = true;
   setChrome({ prompt: true, clock: true, keyboard: true });
@@ -314,6 +327,7 @@ function runPlacement(): void {
     onAbort: (reason) => {
       forceKeyboard = false;
       setChrome({});
+      music.stop();
       showScreen(`
         <div class="sheet narrow">
           <h1>Let's start that again</h1>
@@ -328,6 +342,7 @@ function runPlacement(): void {
 
 function showPlacementResult(route: PlacementRoute, wpm: number, accuracy: number, reachedWords: boolean): void {
   setChrome({});
+  music.stop();
   showScreen(`
     <div class="sheet narrow">
       <h1>${Math.round(wpm)} WPM at ${Math.round(accuracy * 100)}%</h1>
@@ -381,6 +396,7 @@ function applyRoute(
 function showMenu(): void {
   if (!profile) return showProfiles();
   setChrome({});
+  music.stop();
   robotPanel.style.display = 'none';
   const lesson = lessonAt(profile.stage, profile.lesson);
   const stageInfo = stage(profile.stage);
@@ -474,6 +490,7 @@ function showWarmupOffer(): void {
 function runWarmup(): void {
   if (!profile) return;
   audio.ensureStarted();
+  startFocusTrack();
   hideScreen();
   setChrome({ prompt: true, clock: true, keyboard: true });
 
@@ -536,6 +553,7 @@ function startLesson(): void {
 function runLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
   if (!profile) return;
   audio.ensureStarted();
+  startFocusTrack();
   hideScreen();
   setChrome({ prompt: true, hud: true, keyboard: true });
 
@@ -591,6 +609,7 @@ function finishLesson(lesson: NonNullable<ReturnType<typeof lessonAt>>): void {
   const p = encounter.progress;
   encounter.stop();
   setChrome({});
+  music.stop();
 
   const outcome = judgeLesson(profile.stage, p.accuracy, p.wpm, p.tokensCompleted, encounter.worstKey());
   const showScore = comboVisible(profile.route, profile.stage);
@@ -799,6 +818,7 @@ function showSurvivalIntro(): void {
 function runSurvival(): void {
   if (!profile) return;
   audio.ensureStarted();
+  startFocusTrack();
   hideScreen();
   setChrome({ prompt: true, hud: true, keyboard: true });
 
@@ -891,6 +911,7 @@ function endSurvival(reason: string): void {
   run = null;
   encounter.stop();
   setChrome({});
+  music.stop();
   showScreen(`
     <div class="sheet narrow">
       <h1>THE RUN ENDS</h1>
@@ -941,6 +962,7 @@ function showSpeedSetup(): void {
 function runSpeedTest(durationS: 15 | 30 | 60 | 120): void {
   if (!profile) return;
   audio.ensureStarted();
+  startFocusTrack();
   hideScreen();
   setChrome({ prompt: true, clock: true, keyboard: true });
 
@@ -966,6 +988,7 @@ function runSpeedTest(durationS: 15 | 30 | 60 | 120): void {
     },
     onAbort: (reason) => {
       setChrome({});
+      music.stop();
       showScreen(`
         <div class="sheet narrow">
           <h1>Attempt discarded</h1>
@@ -985,6 +1008,7 @@ function runSpeedTest(durationS: 15 | 30 | 60 | 120): void {
 
 function showSpeedResult(result: SpeedTestResult, weak: { slowest: string[]; leastAccurate: string[] }): void {
   setChrome({});
+  music.stop();
   showScreen(`
     <div class="sheet narrow">
       <h1>${Math.round(result.wpm)} WPM</h1>
@@ -1133,6 +1157,10 @@ function showSettings(back: () => void): void {
           ${seg('audioMix', [0, 0.25, 0.5, 0.75, 1], s.audioMix, ['mute', '25', '50', '75', '100'])}
         </div>
         <div class="row">
+          <span>Focus soundtrack<span class="keyhint">binaural beat &mdash; headphones</span></span>
+          ${seg('focusTrack', ['on', 'off'], s.focusTrack ? 'on' : 'off')}
+        </div>
+        <div class="row">
           <span>Pause when the window loses focus</span>
           ${seg('pauseOnBlur', ['on', 'off'], s.pauseOnBlur ? 'on' : 'off')}
         </div>
@@ -1159,7 +1187,7 @@ function showSettings(back: () => void): void {
       const raw = (el as HTMLElement).dataset.value!;
       const st = profile!.settings as unknown as Record<string, unknown>;
       if (key === 'lookahead' || key === 'audioMix') st[key] = Number(raw);
-      else if (key === 'highContrast' || key === 'motionReduction' || key === 'pauseOnBlur') st[key] = raw === 'on';
+      else if (key === 'highContrast' || key === 'motionReduction' || key === 'pauseOnBlur' || key === 'focusTrack') st[key] = raw === 'on';
       else st[key] = raw;
       save();
       applySettings();
@@ -1186,6 +1214,13 @@ function applySettings(): void {
   document.body.classList.toggle('high-contrast', s?.highContrast === true);
   keyboard.setFingerGuide(s?.fingerGuide !== 'off');
   audio.setVolume(s?.audioMix ?? 0.5);
+  music.setVolume(s?.audioMix ?? 0.5);
+  // A toggle from the pause menu applies immediately: the track stops mid-
+  // fade, or joins a run already in progress.
+  if (s?.focusTrack === false) music.stop();
+  else if (encounter.currentState === 'running' || encounter.currentState === 'paused' || drill.isRunning || warmupDrill.isRunning) {
+    startFocusTrack();
+  }
   encounter.setEffects({
     intensity: s?.intensity ?? 'full',
     motionReduction: s?.motionReduction === true,

@@ -1,8 +1,9 @@
 /**
- * Creature viewer: the three enemy kinds side by side, close up, under the
- * game's lighting mood, walking in place. Exists so the models can be art-
- * tuned without grinding a lesson to Stage 3 -- and it renders synchronously
- * on load, so it shows a correct frame even in a throttled background tab.
+ * Machine viewer: the three enemy kinds side by side, close up, under the
+ * game's lighting mood, walking in place -- the spider drone, the hound,
+ * and the war mech. Exists so the models can be art-tuned without grinding
+ * a lesson to Stage 3 -- and it renders synchronously on load, so it shows
+ * a correct frame even in a throttled background tab.
  */
 
 import { Engine } from '@babylonjs/core/Engines/engine';
@@ -36,8 +37,8 @@ const lamp = new PointLight('lamp', new Vector3(0, 3.6, -1), scene);
 lamp.intensity = 0.65;
 lamp.diffuse = new Color3(0.75, 0.9, 0.8);
 
-const camera = new FreeCamera('cam', new Vector3(0, 1.7, 3.8), scene);
-camera.setTarget(new Vector3(0, 1.2, -2));
+const camera = new FreeCamera('cam', new Vector3(0, 1.8, 4.4), scene);
+camera.setTarget(new Vector3(0, 1.3, -2));
 camera.inputs.clear();
 
 const ground = MeshBuilder.CreateGround('ground', { width: 14, height: 14 }, scene);

@@ -30,6 +30,7 @@
  */
 
 import { mergedAggregate, windowAccuracy } from '../profile/mastery';
+import { TOKENS_PER_KIND } from './scoring';
 import type { Profile } from '../profile/types';
 import type { Lesson } from '../curriculum/stages';
 
@@ -166,9 +167,15 @@ export function pacingFor(
   const buffer = (opts.tightBand ? TIGHT_BUFFER : BASE_BUFFER) + steps * EASE_STEP;
   const secondsPerToken = needSeconds * (1 + buffer);
 
+  // One enemy per spawn interval, and the baseline enemy (the hound) now
+  // carries TWO words: the interval scales by tokens-per-enemy so the
+  // implied typing rate stays at or below what the player has shown. The
+  // rarer kinds average out to about the same (spider 1, mech 3).
+  const tokensPerEnemy = TOKENS_PER_KIND.standard;
+
   return {
     secondsPerToken,
-    spawnIntervalS: Math.max(MIN_SPAWN_INTERVAL_S, secondsPerToken),
+    spawnIntervalS: Math.max(MIN_SPAWN_INTERVAL_S, secondsPerToken * tokensPerEnemy),
     walkTimeS: Math.min(MAX_WALK_TIME_S, Math.max(MIN_WALK_TIME_S, secondsPerToken * SLACK_TOKENS)),
     buffer,
     easingSteps: steps,

@@ -97,6 +97,13 @@ describe('pacing (PRD 13: 20-40% more time than recent performance requires)', (
     }
   });
 
+  it('prices the spawn interval for the two-word hound, not one word per enemy', () => {
+    // The baseline enemy carries TWO words since the robot redesign: above
+    // the shootout floor, one enemy per interval must allow two token times.
+    const pacing = pacingFor(typedProfile(700), LESSON);
+    expect(pacing.spawnIntervalS).toBeCloseTo(pacing.secondsPerToken * 2, 5);
+  });
+
   it('applies the base buffer inside the PRD band at zero easing', () => {
     expect(BASE_BUFFER).toBeGreaterThanOrEqual(0.2);
     expect(BASE_BUFFER).toBeLessThanOrEqual(0.4);

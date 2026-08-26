@@ -150,10 +150,12 @@ describe('enemy-sized tokens (PRD 14)', () => {
     for (const t of tokens) expect(t.length).toBeGreaterThanOrEqual(4);
   });
 
-  it('standard enemies draw from the normal adaptive flow', () => {
+  it('standard enemies (the hound) carry two words from the normal adaptive flow', () => {
     const source = new AdaptiveSource(LESSON, plan({ weak: new Set(['k']) }), 7);
-    for (let i = 0; i < 60; i++) source.tokensFor('standard');
-    expect(source.mix.served).toBe(60); // bookkeeping still counts them
+    for (let i = 0; i < 60; i++) {
+      expect(source.tokensFor('standard')).toHaveLength(2);
+    }
+    expect(source.mix.served).toBe(120); // bookkeeping still counts every word
   });
 
   it('never serves an empty token even when the length filter finds nothing', () => {

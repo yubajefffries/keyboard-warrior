@@ -110,14 +110,17 @@ describe('kills and words scale with the live multiplier', () => {
     expect(hot.runningTotal - hotBefore).toBe(cold.runningTotal * 4);
   });
 
-  it('prices the brute above the crawler above the standard', () => {
+  it('prices kills by the work they take: mech above hound above spider', () => {
+    // The mech soaks three words, the hound two, the spider one -- the
+    // spider's price stays close behind the hound's because its threat is
+    // speed, not staying power.
     const s = (kind: 'standard' | 'crawler' | 'brute') => {
       const x = new Scorer();
       x.elimination(kind);
       return x.runningTotal;
     };
-    expect(s('brute')).toBeGreaterThan(s('crawler'));
-    expect(s('crawler')).toBeGreaterThan(s('standard'));
+    expect(s('brute')).toBeGreaterThan(s('standard'));
+    expect(s('standard')).toBeGreaterThan(s('crawler'));
   });
 });
 

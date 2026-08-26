@@ -35,7 +35,7 @@ import {
 import { StatsTracker } from '../stats/keystats';
 import type { WeaponAudio } from '../audio/sfx';
 import { Scorer, type EnemyKind, type ScoreBreakdown } from './scoring';
-import { buildLaboratory } from './environment';
+import { buildFacility } from './environment';
 import {
   HEARTBEAT_AT,
   HEARTBEAT_URGENT_AT,
@@ -123,7 +123,8 @@ interface EnemyT {
   speed: number;
   alive: boolean;
   kind: EnemyKind;
-  /** Remaining words. The brute spawns with three; killing it takes all of them. */
+  /** Remaining words. The hound spawns with two, the mech with three;
+   *  killing an enemy takes all of them. */
   tokens: string[];
 }
 
@@ -227,9 +228,9 @@ export class Encounter {
     lamp.intensity = 0.65;
     lamp.diffuse = new Color3(0.75, 0.9, 0.8);
 
-    // The abandoned laboratory (PRD 8, Phase 1b environment pass). Static,
+    // The abandoned robotics facility (PRD 8, environment passes). Static,
     // frozen, procedural; see environment.ts for the budget notes.
-    buildLaboratory(this.scene);
+    buildFacility(this.scene);
 
     // Recoil moves the GUN, never the prompt.
     this.gunRoot = new TransformNode('gunRoot', this.scene);
@@ -322,7 +323,7 @@ export class Encounter {
         this.tokensCompleted += 1;
 
         // One token, one shot. Whether it kills depends on who carried it:
-        // the brute soaks hits until its word list is empty.
+        // hounds and mechs soak hits until their word list is empty.
         const target = this.active;
         if (target) {
           target.tokens.shift();
@@ -833,7 +834,7 @@ export class Encounter {
       if (!this.active || !this.active.alive) this.engageNearest();
 
       // Survival health: time under threat, scaled by how close the nearest
-      // enemy is. An empty room costs nothing; a face full of infected does.
+      // enemy is. An empty room costs nothing; a face full of machines does.
       if (this.mode === 'survival') {
         let nearest = -Infinity;
         for (const e of this.enemies)

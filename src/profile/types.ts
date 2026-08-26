@@ -159,6 +159,8 @@ export interface ProfileSettings {
   motionReduction: boolean;
   /** 0..1, weapon/UI vs atmosphere. PRD 19. */
   audioMix: number;
+  /** The binaural-beat focus soundtrack (audio/music.ts). Headphones. */
+  focusTrack: boolean;
   pauseOnBlur: boolean;
   /** Words visible ahead of the active prompt. PRD 6. */
   lookahead: number;
@@ -174,6 +176,7 @@ export function defaultSettings(route: Route): ProfileSettings {
     intensity: 'full',
     motionReduction: false,
     audioMix: 0.5,
+    focusTrack: true,
     pauseOnBlur: true,
     lookahead: 3,
   };

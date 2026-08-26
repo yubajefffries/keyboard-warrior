@@ -22,7 +22,7 @@
 import { mulberry32, pickFresh } from '../util/rand';
 import { wordsFor } from './speedtest';
 import { STAGES } from '../curriculum/stages';
-import type { EnemyKind } from '../game/scoring';
+import { TOKENS_PER_KIND, type EnemyKind } from '../game/scoring';
 import type { Profile } from '../profile/types';
 
 // ---------- Health (PRD 16) ----------
@@ -89,10 +89,20 @@ export function demonstratedPeakCps(profile: Profile): number {
 export function wavePlan(profile: Profile, wave: number, meanTokenChars: number): WavePlan {
   const peakCps = demonstratedPeakCps(profile);
   const buffer = Math.max(WAVE_BUFFER_FLOOR, WAVE_BUFFER_START - WAVE_BUFFER_STEP * (wave - 1));
-  const needS = meanTokenChars / peakCps + READ_BEAT_S;
+  const crawlerChance = Math.min(0.3, 0.05 + 0.05 * wave);
+  const bruteChance = wave >= 3 ? Math.min(0.2, 0.05 * (wave - 2)) : 0;
+  // One enemy per spawn interval, but the kinds carry different word counts
+  // (spider 1, hound 2, mech 3): the interval scales by the wave's expected
+  // tokens per enemy, or the hound redesign would double the real demand.
+  const meanTokensPerEnemy =
+    TOKENS_PER_KIND.standard * (1 - crawlerChance - bruteChance) +
+    TOKENS_PER_KIND.crawler * crawlerChance +
+    TOKENS_PER_KIND.brute * bruteChance;
+  const charsPerEnemy = meanTokenChars * meanTokensPerEnemy;
+  const needS = charsPerEnemy / peakCps + READ_BEAT_S;
   // The peak guard: even at zero buffer, the interval never implies a rate
   // above PEAK_SHARE of what the player has actually shown.
-  const peakFloorS = meanTokenChars / (peakCps * PEAK_SHARE);
+  const peakFloorS = charsPerEnemy / (peakCps * PEAK_SHARE);
   const spawnIntervalS = Math.max(MIN_SPAWN_S, peakFloorS, needS * (1 + buffer));
 
   return {
@@ -100,8 +110,8 @@ export function wavePlan(profile: Profile, wave: number, meanTokenChars: number)
     quota: Math.min(QUOTA_CAP, QUOTA_BASE + QUOTA_PER_WAVE * wave),
     spawnIntervalS,
     walkTimeS: Math.max(WALK_FLOOR_S, WALK_START_S - WALK_STEP_S * (wave - 1)),
-    crawlerChance: Math.min(0.3, 0.05 + 0.05 * wave),
-    bruteChance: wave >= 3 ? Math.min(0.2, 0.05 * (wave - 2)) : 0,
+    crawlerChance,
+    bruteChance,
   };
 }
 
@@ -193,12 +203,12 @@ export class SurvivalSource {
 
   tokensFor(kind: EnemyKind): string[] {
     if (kind === 'crawler') {
-      // Recognition speed: the shortest undecorated words available.
+      // The spider: recognition speed, the shortest undecorated words available.
       const short = this.words.filter((w) => w.length <= 4);
       return [pickFresh(this.rand, short.length ? short : this.words, this.recent)];
     }
     if (kind === 'brute') {
-      // The heavy: rare and long where the pool allows, a sentence on top
+      // The mech: rare and long where the pool allows, a sentence on top
       // when the curriculum does.
       const long = [...this.rare, ...this.words.filter((w) => w.length >= 6)];
       const pool = long.length ? long : this.words;
@@ -213,7 +223,8 @@ export class SurvivalSource {
       );
       return tokens;
     }
-    return [this.next()];
+    // The hound: two words from the wave's normal flow.
+    return [this.next(), this.next()];
   }
 
   /** Capitalization and punctuation density, PRD 18's levers. */

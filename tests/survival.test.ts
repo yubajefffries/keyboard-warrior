@@ -137,15 +137,26 @@ describe('content levers respect the curriculum (PRD 20)', () => {
     }
   });
 
-  it('keeps crawlers short and brutes heavy', () => {
+  it('keeps spiders short, hands hounds two words, and keeps mechs heavy', () => {
     const source = new SurvivalSource(keysTaughtThrough(10), 13);
     source.setWave(6);
     for (let i = 0; i < 40; i++) {
       const [crawler] = source.tokensFor('crawler');
       expect(crawler.length).toBeLessThanOrEqual(4);
+      expect(source.tokensFor('standard')).toHaveLength(2);
       const brute = source.tokensFor('brute');
       expect(brute).toHaveLength(3);
     }
+  });
+
+  it('prices the spawn interval by tokens per enemy, not tokens per word', () => {
+    // A wave's expected enemy carries about two words (hound 2, spider 1,
+    // mech 3), so the interval must cover roughly twice the per-word time.
+    const p = fastProfile(60);
+    const plan = wavePlan(p, 10, 6); // mix fully ramped by wave 10
+    const peakCps = demonstratedPeakCps(p);
+    const meanTokensPerEnemy = 2 * (1 - plan.crawlerChance - plan.bruteChance) + plan.crawlerChance + 3 * plan.bruteChance;
+    expect(plan.spawnIntervalS).toBeGreaterThanOrEqual((6 * meanTokensPerEnemy) / (peakCps * PEAK_SHARE) - 1e-9);
   });
 });
 

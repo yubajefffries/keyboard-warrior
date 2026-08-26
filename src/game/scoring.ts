@@ -13,6 +13,18 @@
 
 export type EnemyKind = 'standard' | 'crawler' | 'brute';
 
+/**
+ * Words each kind carries from spawn (PRD 14; robot redesign 2026-08-25):
+ * the spider drone dies to one word, the hound takes two, the war mech
+ * soaks three. Every pacing model reads this so the spawn interval always
+ * reflects the real typing demand per enemy.
+ */
+export const TOKENS_PER_KIND: Record<EnemyKind, number> = {
+  standard: 2,
+  crawler: 1,
+  brute: 3,
+};
+
 /** PRD 17: 10 correct = 2x, 25 = 3x, 50 = 4x, 100 = 5x, capped. [REVIEW] */
 export const COMBO_THRESHOLDS: { streak: number; multiplier: number }[] = [
   { streak: 10, multiplier: 2 },
@@ -26,9 +38,9 @@ export const KEY_POINTS = 10;
 export const WORD_POINTS_FLAT = 20;
 export const WORD_POINTS_PER_CHAR = 5;
 export const ELIMINATION_POINTS: Record<EnemyKind, number> = {
-  standard: 100,
-  crawler: 150, // faster, scarier, shorter window
-  brute: 300, // three words of work
+  standard: 180, // the hound: two words of work
+  crawler: 150, // the spider: one word, but fast and scary
+  brute: 300, // the mech: three words of armor
 };
 /** One-time bonus for reaching each combo tier, once per encounter. */
 export const STREAK_BONUS: Record<number, number> = { 10: 100, 25: 250, 50: 500, 100: 1000 };
