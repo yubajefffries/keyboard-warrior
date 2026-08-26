@@ -109,6 +109,43 @@ describe('active-target highlight (PRD 6)', () => {
   });
 });
 
+describe('health bar (armor readout)', () => {
+  it('hidden at full, shows and depletes per hit, hides on death and reset', () => {
+    const { scene, mats } = setup();
+    const c = buildCreature(scene, 'brute', mats);
+    const parts = partsOf(scene, c.root);
+    const back = parts.find((m) => m.material === mats.barBack)!;
+    const fill = parts.find((m) => m.material === mats.barFill)!;
+    expect(back).toBeDefined();
+    expect(fill).toBeDefined();
+    expect(back.isEnabled(false)).toBe(false); // untouched machines wear no bar
+
+    c.setHealth(2 / 3); // the mech takes its first of three words
+    expect(back.isEnabled(false)).toBe(true);
+    expect(fill.scaling.x).toBeCloseTo(2 / 3);
+    c.setHealth(1 / 3);
+    expect(fill.scaling.x).toBeCloseTo(1 / 3);
+    // Depleting must pin the left edge (drain rightward), not shrink centered.
+    expect(fill.position.x).toBeLessThan(0);
+
+    c.setHealth(0); // dead: the bar goes with it
+    expect(back.isEnabled(false)).toBe(false);
+    c.setHealth(0.5);
+    c.reset(); // pooled reuse hands back a fresh, unhurt machine
+    expect(back.isEnabled(false)).toBe(false);
+  });
+
+  it('the highlight swap never touches the bar', () => {
+    const { scene, mats } = setup();
+    const c = buildCreature(scene, 'standard', mats);
+    c.setHealth(0.5);
+    c.setActive(true);
+    const parts = partsOf(scene, c.root);
+    expect(parts.some((m) => m.material === mats.barFill)).toBe(true);
+    expect(parts.some((m) => m.material === mats.barBack)).toBe(true);
+  });
+});
+
 describe('intensity (PRD 21/22)', () => {
   it('low intensity dims hull, target glow, and the sensor eyes; full restores them', () => {
     const { mats } = setup();

@@ -59,11 +59,16 @@ const creatures: Creature[] = KINDS.map((kind) => {
 });
 
 const checkbox = (id: string) => document.getElementById(id) as HTMLInputElement;
+/** What each kind's bar shows in the "damaged" preview: one hit taken. */
+const HURT: Record<EnemyKind, number> = { standard: 1 / 2, crawler: 1 / 2, brute: 2 / 3 };
 const applyToggles = () => {
   applyCreatureIntensity(mats, checkbox('low').checked);
-  for (const c of creatures) c.setActive(checkbox('active').checked);
+  for (const c of creatures) {
+    c.setActive(checkbox('active').checked);
+    c.setHealth(checkbox('hurt').checked ? HURT[c.kind] : 1);
+  }
 };
-for (const id of ['active', 'low', 'reduce', 'walk']) {
+for (const id of ['active', 'low', 'reduce', 'walk', 'hurt']) {
   checkbox(id).addEventListener('change', () => {
     applyToggles();
     step(1 / 60);

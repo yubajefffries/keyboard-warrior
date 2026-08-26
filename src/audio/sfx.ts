@@ -268,15 +268,21 @@ export class WeaponAudio {
    * a long boom whose filter closes as it dies, mid bark, top crack.
    */
   fire(): void {
-    // The door slam: a sub that dives an octave and drives the shaper hard.
+    // The door slam: a sub that dives past an octave and drives the shaper
+    // hard. Bass is the family's spec: the shot should hit in the chest.
     this.toneHit({
-      freq: this.jitter(120, 0.08), endFreq: 34, duration: 0.22,
-      gain: 1.5, type: 'sine', attack: 0.001, reverb: 0.3,
+      freq: this.jitter(110, 0.08), endFreq: 28, duration: 0.32,
+      gain: 2.1, type: 'sine', attack: 0.001, reverb: 0.3,
     });
     // The growl underneath: saturated triangle, pure Quake.
     this.toneHit({
-      freq: this.jitter(70, 0.1), endFreq: 40, duration: 0.3,
-      gain: 0.9, type: 'triangle', attack: 0.001, reverb: 0.35,
+      freq: this.jitter(64, 0.1), endFreq: 36, duration: 0.4,
+      gain: 1.3, type: 'triangle', attack: 0.001, reverb: 0.35,
+    });
+    // A second sub an octave down again: the part you feel more than hear.
+    this.toneHit({
+      freq: this.jitter(55, 0.06), endFreq: 24, duration: 0.4,
+      gain: 1.1, type: 'sine', attack: 0.002, reverb: 0.2,
     });
     // The boom: long, dark by the end.
     this.burst({
@@ -298,12 +304,17 @@ export class WeaponAudio {
   /** Revolver: a magnum, not a pistol. Tighter than the pump, just as loud. */
   revolverFire(): void {
     this.toneHit({
-      freq: this.jitter(140, 0.08), endFreq: 45, duration: 0.14,
-      gain: 1.3, type: 'sine', attack: 0.001, reverb: 0.35,
+      freq: this.jitter(130, 0.08), endFreq: 36, duration: 0.2,
+      gain: 1.8, type: 'sine', attack: 0.001, reverb: 0.35,
     });
     this.toneHit({
-      freq: this.jitter(85, 0.1), endFreq: 48, duration: 0.18,
-      gain: 0.7, type: 'triangle', attack: 0.001, reverb: 0.3,
+      freq: this.jitter(80, 0.1), endFreq: 42, duration: 0.26,
+      gain: 1.05, type: 'triangle', attack: 0.001, reverb: 0.3,
+    });
+    // The magnum's chest thump under the crack.
+    this.toneHit({
+      freq: this.jitter(58, 0.06), endFreq: 26, duration: 0.3,
+      gain: 0.85, type: 'sine', attack: 0.002, reverb: 0.2,
     });
     this.burst({
       duration: 0.24, gain: 1.05, filterType: 'lowpass',

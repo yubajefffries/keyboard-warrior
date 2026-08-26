@@ -126,10 +126,18 @@ interface EnemyT {
   /** Remaining words. The hound spawns with two, the mech with three;
    *  killing an enemy takes all of them. */
   tokens: string[];
+  /** Words carried at spawn, so the health bar knows what a full bar is. */
+  totalTokens: number;
 }
 
 /** Per-kind movement relative to the pacing walk time. PRD 14. [REVIEW] */
 const KIND_SPEED: Record<EnemyKind, number> = { standard: 1, crawler: 1.7, brute: 0.6 };
+/** Where a shot lands on each kind: center mass, in world units off the ground. */
+const AIM_Y: Record<EnemyKind, number> = { standard: 0.75, crawler: 0.4, brute: 1.9 };
+/** Seconds the tracer takes to cross to its target. Fast, but seen. */
+const TRACER_S = 0.07;
+/** Seconds the muzzle flash geometry stays lit. One brief flash per shot. */
+const FLASH_S = 0.06;
 /** Learn-mode spawn odds once variety is on (Stage 3+); survival overrides
  *  per wave via setMix. At most one brute at a time either way. [REVIEW] */
 const DEFAULT_CRAWLER_CHANCE = 0.18;
@@ -156,6 +164,13 @@ export class Encounter {
   private enemies: EnemyT[] = [];
   private recoil = 0;
   private pumpAnim = 0;
+  private flashMesh: Mesh;
+  private flashT = 0;
+  private tracerMesh: Mesh;
+  /** -1 idle; otherwise 0..1 progress from muzzle to target. */
+  private tracerT = -1;
+  private tracerFrom = new Vector3();
+  private tracerTo = new Vector3();
   private spawnTimer = 0;
   private hudLine = '';
 
@@ -282,6 +297,32 @@ export class Encounter {
     this.muzzle.diffuse = new Color3(1, 0.7, 0.3);
     this.muzzle.intensity = 0;
 
+    // The visible muzzle flash: one small emissive card at the barrel tip,
+    // lit for FLASH_S per shot with a random spin so no two flashes match.
+    // Suppressed entirely at low intensity (PRD 21/22), same as the light.
+    const flashMat = new StandardMaterial('flashMat', this.scene);
+    flashMat.emissiveColor = new Color3(1, 0.75, 0.3);
+    flashMat.diffuseColor = Color3.Black();
+    flashMat.disableLighting = true;
+    this.flashMesh = MeshBuilder.CreatePlane('flash', { size: 0.3, sideOrientation: 2 /* DOUBLESIDE */ }, this.scene);
+    this.flashMesh.parent = this.gunRoot;
+    this.flashMesh.position.set(0, 0, 0.92);
+    this.flashMesh.isPickable = false;
+    this.flashMesh.material = flashMat;
+    this.flashMesh.setEnabled(false);
+
+    // The tracer: a short bright round that crosses from the muzzle to the
+    // target in TRACER_S, so every shot is SEEN to land on the machine that
+    // carried the word. World-space, emissive, fog applies.
+    const tracerMat = new StandardMaterial('tracerMat', this.scene);
+    tracerMat.emissiveColor = new Color3(1, 0.82, 0.35);
+    tracerMat.diffuseColor = Color3.Black();
+    tracerMat.disableLighting = true;
+    this.tracerMesh = MeshBuilder.CreateBox('tracer', { width: 0.04, height: 0.04, depth: 1.5 }, this.scene);
+    this.tracerMesh.isPickable = false;
+    this.tracerMesh.material = tracerMat;
+    this.tracerMesh.setEnabled(false);
+
     this.creatureMats = makeCreatureMaterialSet(this.scene);
 
     this.typing = new TypingEngine(this.tracker, {
@@ -328,17 +369,19 @@ export class Encounter {
         if (target) {
           target.tokens.shift();
           if (target.tokens.length === 0) {
-            this.fireWeapon(true);
+            this.fireWeapon(true, this.aimPointOf(target));
             this.scorer.elimination(target.kind);
             target.alive = false;
             this.releaseCreature(target.creature);
             this.cb.onKill?.(target.kind);
           } else {
-            this.fireWeapon(false);
+            this.fireWeapon(false, this.aimPointOf(target));
             this.deps.audio.bruteHit();
-            // Staggered, not stopped: knocked back but still coming.
+            // Staggered, not stopped: knocked back but still coming -- and
+            // now wearing its remaining armor as a bar over its head.
             target.creature.root.position.z = Math.max(-38, target.creature.root.position.z - 1.2);
             target.creature.stagger();
+            target.creature.setHealth(target.tokens.length / target.totalTokens);
           }
         } else {
           this.fireWeapon(true);
@@ -704,8 +747,17 @@ export class Encounter {
     this.deps.prompt.setCompleted(this.completed);
   }
 
-  /** One completed token = one shot. `kill` decides the sound of the hit. */
-  private fireWeapon(kill: boolean): void {
+  /** Where a shot lands on this enemy: center mass in world space. */
+  private aimPointOf(enemy: EnemyT): Vector3 {
+    const p = enemy.creature.root.position;
+    return new Vector3(p.x, AIM_Y[enemy.kind], p.z);
+  }
+
+  /**
+   * One completed token = one shot. `kill` decides the sound of the hit;
+   * `aimPoint` is where the tracer flies (none for a shot into an empty room).
+   */
+  private fireWeapon(kill: boolean, aimPoint?: Vector3): void {
     const audio = this.deps.audio;
     this.shotsFired += 1;
     if (this.weapon === 'revolver') {
@@ -723,8 +775,27 @@ export class Encounter {
       this.recoil = 1;
       this.pumpAnim = 1;
     }
-    // The muzzle flash is the one photosensitivity-relevant flash in combat.
-    if (this.effects.intensity !== 'low') this.muzzle.intensity = this.weapon === 'revolver' ? 1.6 : 2.2;
+    // The muzzle flash is the one photosensitivity-relevant flash in combat:
+    // low intensity suppresses the light, the card, and the tracer together.
+    if (this.effects.intensity !== 'low') {
+      this.muzzle.intensity = this.weapon === 'revolver' ? 1.6 : 2.2;
+      this.flashT = FLASH_S;
+      this.flashMesh.setEnabled(true);
+      this.flashMesh.rotation.z = Math.random() * Math.PI;
+      const flashSize = this.weapon === 'revolver' ? 0.8 : 1.1;
+      this.flashMesh.scaling.set(flashSize, flashSize, flashSize);
+      if (aimPoint) {
+        this.tracerFrom.copyFrom(this.muzzle.getAbsolutePosition());
+        this.tracerTo.copyFrom(aimPoint);
+        const dir = this.tracerTo.subtract(this.tracerFrom);
+        if (dir.lengthSquared() > 0.05) {
+          this.tracerMesh.setEnabled(true);
+          this.tracerMesh.position.copyFrom(this.tracerFrom);
+          this.tracerMesh.setDirection(dir.normalize());
+          this.tracerT = 0;
+        }
+      }
+    }
   }
 
   private spawn(): void {
@@ -738,7 +809,8 @@ export class Encounter {
     // rather than marching. Kind multipliers are what make a crawler a crawler.
     const speed =
       (MEAN_TRAVEL_UNITS / this.pacing.walkTimeS) * KIND_SPEED[kind] * (0.9 + Math.random() * 0.2);
-    this.enemies.push({ creature, speed, alive: true, kind, tokens: this.provider.tokensFor(kind) });
+    const tokens = this.provider.tokensFor(kind);
+    this.enemies.push({ creature, speed, alive: true, kind, tokens, totalTokens: tokens.length });
     this.redrawUpcoming();
   }
 
@@ -805,6 +877,25 @@ export class Encounter {
       this.pumpGrip.position.z = 0.28 - Math.sin((1 - this.pumpAnim) * Math.PI) * 0.12 * motion;
     }
     if (this.muzzle.intensity > 0) this.muzzle.intensity = Math.max(0, this.muzzle.intensity - dt * 30);
+    // Flash card: dies with its timer, shrinking as it goes.
+    if (this.flashT > 0) {
+      this.flashT = Math.max(0, this.flashT - dt);
+      if (this.flashT === 0) this.flashMesh.setEnabled(false);
+      else {
+        const s = (0.6 + (this.flashT / FLASH_S) * 0.5) * (this.weapon === 'revolver' ? 0.8 : 1.1);
+        this.flashMesh.scaling.set(s, s, s);
+      }
+    }
+    // Tracer: fly the muzzle-to-target line, then vanish at the hit.
+    if (this.tracerT >= 0) {
+      this.tracerT += dt / TRACER_S;
+      if (this.tracerT >= 1) {
+        this.tracerT = -1;
+        this.tracerMesh.setEnabled(false);
+      } else {
+        Vector3.LerpToRef(this.tracerFrom, this.tracerTo, this.tracerT, this.tracerMesh.position);
+      }
+    }
 
     this.deps.prompt.tick(now);
     if (this.state !== 'running') return;

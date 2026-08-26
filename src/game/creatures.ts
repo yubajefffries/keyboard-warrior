@@ -62,6 +62,10 @@ export interface CreatureMaterialSet {
   core: StandardMaterial;
   /** Sensor eyes: steady red glow, dimmed by low intensity. */
   eye: StandardMaterial;
+  /** Health bar housing above a wounded machine. Never repainted. */
+  barBack: StandardMaterial;
+  /** Health bar fill: amber status glow, scaled by remaining words. */
+  barFill: StandardMaterial;
 }
 
 const HULL: Record<EnemyKind, Color3> = {
@@ -95,6 +99,14 @@ export function makeCreatureMaterialSet(scene: Scene): CreatureMaterialSet {
   core.freeze();
   const eye = paint('machine.eye', new Color3(0.05, 0.02, 0.02));
   eye.emissiveColor = EYE_GLOW; // repainted by intensity: cannot freeze
+  // The health bar reads by emissive alone, so it stays legible in the fog
+  // and in low intensity without ever being repainted.
+  const barBack = paint('machine.barback', new Color3(0.02, 0.02, 0.025));
+  barBack.emissiveColor = new Color3(0.05, 0.05, 0.06);
+  barBack.freeze();
+  const barFill = paint('machine.barfill', new Color3(0.1, 0.07, 0.01));
+  barFill.emissiveColor = new Color3(0.75, 0.5, 0.1); // amber status glow, steady
+  barFill.freeze();
   return {
     standard: paint('machine.hull.standard', HULL.standard),
     crawler: paint('machine.hull.crawler', HULL.crawler),
@@ -103,6 +115,8 @@ export function makeCreatureMaterialSet(scene: Scene): CreatureMaterialSet {
     frame,
     core,
     eye,
+    barBack,
+    barFill,
   };
 }
 
@@ -131,6 +145,13 @@ export interface Creature {
   /** The machine took a non-fatal hit: a visible lurch on top of the knockback. */
   stagger(): void;
   /**
+   * Remaining armor as a fraction of words carried at spawn. The bar above
+   * the machine appears at the first hit (fraction < 1) and depletes per
+   * shot; 1 or less-than-or-equal-to 0 hides it. Camera-facing, emissive,
+   * steady -- it informs, it does not flash.
+   */
+  setHealth(fraction: number): void;
+  /**
    * Back to a fresh body for pooled reuse: highlight off, stagger cleared,
    * a new random stride phase so the recycled walker is not in step with
    * the one it used to be.
@@ -154,6 +175,15 @@ type PartCat = 'hull' | 'frame' | 'core' | 'eye';
 /** Strides per second at each kind's walk speed. [REVIEW] tune by eye. */
 const STRIDE_HZ: Record<EnemyKind, number> = { standard: 1.5, crawler: 2.8, brute: 0.5 };
 
+/**
+ * Health bar height above the ground anchor, clear of each silhouette.
+ * (The silhouette contract test bounds these too: the spider's bar must
+ * stay low, the hound's below head height of a person.)
+ */
+const BAR_Y: Record<EnemyKind, number> = { standard: 1.32, crawler: 0.72, brute: 2.85 };
+const BAR_W = 0.9;
+const FILL_W = 0.84;
+
 class CreatureImpl implements Creature {
   root: TransformNode;
   kind: EnemyKind;
@@ -166,6 +196,8 @@ class CreatureImpl implements Creature {
   private walkPhase: number;
   private strideHz: number;
   private staggerT = 0;
+  private barBack: Mesh;
+  private barFill: Mesh;
 
   constructor(scene: Scene, kind: EnemyKind, mats: CreatureMaterialSet) {
     this.kind = kind;
@@ -179,6 +211,27 @@ class CreatureImpl implements Creature {
     if (kind === 'crawler') this.buildSpider(scene);
     else if (kind === 'brute') this.buildMech(scene);
     else this.buildHound(scene);
+
+    // The armor readout: a camera-facing bar above the machine, hidden
+    // until the first hit lands. The fill is a child of the housing so the
+    // billboard turns them as one; depleting scales the fill toward its
+    // left edge, the direction every health bar in every game depletes.
+    this.barBack = MeshBuilder.CreatePlane(
+      'healthbar', { width: BAR_W, height: 0.09, sideOrientation: 2 /* DOUBLESIDE */ }, scene,
+    );
+    this.barBack.parent = this.root;
+    this.barBack.position.y = BAR_Y[kind];
+    this.barBack.billboardMode = TransformNode.BILLBOARDMODE_ALL;
+    this.barBack.isPickable = false;
+    this.barBack.material = mats.barBack;
+    this.barFill = MeshBuilder.CreatePlane(
+      'healthfill', { width: FILL_W, height: 0.055, sideOrientation: 2 }, scene,
+    );
+    this.barFill.parent = this.barBack;
+    this.barFill.position.z = -0.012; // just proud of the housing, camera side
+    this.barFill.isPickable = false;
+    this.barFill.material = mats.barFill;
+    this.barBack.setEnabled(false);
 
     for (const m of this.hull) m.material = mats[kind];
   }
@@ -478,10 +531,23 @@ class CreatureImpl implements Creature {
     this.staggerT = 1;
   }
 
+  setHealth(fraction: number): void {
+    if (fraction >= 1 || fraction <= 0) {
+      this.barBack.setEnabled(false);
+      return;
+    }
+    this.barBack.setEnabled(true);
+    this.barFill.scaling.x = fraction;
+    // Scaling shrinks toward the center; shifting by half the lost width
+    // pins the fill's left edge so the bar drains rightward.
+    this.barFill.position.x = -((1 - fraction) * FILL_W) / 2;
+  }
+
   reset(): void {
     this.staggerT = 0;
     this.walkPhase = Math.random() * Math.PI * 2;
     this.setActive(false);
+    this.setHealth(1);
   }
 
   dispose(): void {

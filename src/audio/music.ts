@@ -17,9 +17,12 @@
  * over ~20 seconds -- because PRD 22's no-strobe law is a good law for
  * audio too: nothing here throbs, stabs, or startles.
  *
- * Binaural beats only work over headphones (each ear must get its own
- * carrier); over speakers the track degrades gracefully into a soft drone.
- * The settings screen says so.
+ * The beat reaches the listener two ways, so the track works however it is
+ * played: the binaural pair (headphones -- each ear must get its own
+ * carrier), and a gentle amplitude pulse on the ambient bed at the SAME
+ * 14 Hz (an isochronic tremolo), which is acoustic and survives speakers,
+ * laptops, and mono. Headphones get both and are still the strongest
+ * version; the settings screen says so.
  *
  * Runs on its own AudioContext so the weapon bus's compressor never ducks
  * the music and the music never pumps the guns. Toggled from settings
@@ -90,6 +93,24 @@ export class FocusTrack {
       this.nodes.push(osc);
     }
 
+    // The bed bus: everything ambient runs through one gain whose level a
+    // sine LFO rocks at the SAME beat frequency. This is what a speaker
+    // listener actually receives -- the binaural pair needs separated ears,
+    // but an amplitude pulse is plain acoustics. The swing is gentle (a
+    // smooth tremolo, roughly half depth) so it reads as a slow shimmer in
+    // the drone, never a stutter.
+    const bed = ctx.createGain();
+    bed.gain.value = 0.78;
+    bed.connect(this.master);
+    const pulse = ctx.createOscillator();
+    pulse.type = 'sine';
+    pulse.frequency.value = BEAT_HZ;
+    const pulseDepth = ctx.createGain();
+    pulseDepth.gain.value = 0.26;
+    pulse.connect(pulseDepth).connect(bed.gain);
+    pulse.start();
+    this.nodes.push(pulse);
+
     // The bed, part one: a sub drone two octaves down, slightly detuned
     // against itself so it breathes instead of standing still.
     for (const detune of [0, 1.5]) {
@@ -101,7 +122,7 @@ export class FocusTrack {
       const lp = ctx.createBiquadFilter();
       lp.type = 'lowpass';
       lp.frequency.value = 160;
-      osc.connect(lp).connect(g).connect(this.master);
+      osc.connect(lp).connect(g).connect(bed);
       osc.start();
       this.nodes.push(osc);
     }
@@ -127,7 +148,7 @@ export class FocusTrack {
     drift.connect(driftDepth).connect(band.frequency);
     const washGain = ctx.createGain();
     washGain.gain.value = 0.16;
-    noise.connect(band).connect(washGain).connect(this.master);
+    noise.connect(band).connect(washGain).connect(bed);
     noise.start();
     drift.start();
     this.nodes.push(noise, drift);
