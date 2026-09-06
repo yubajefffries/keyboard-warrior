@@ -44,6 +44,7 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
+import { RawTexture } from '@babylonjs/core/Materials/Textures/rawTexture';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import type { EnemyKind } from './scoring';
@@ -83,14 +84,33 @@ const EYE_GLOW_LOW = new Color3(0.06, 0.01, 0.01);
 
 /** Build the whole shared set. The encounter and the harness both use this. */
 export function makeCreatureMaterialSet(scene: Scene): CreatureMaterialSet {
+  // A deterministic machined-metal surface: recessed panel seams, brushed
+  // grain and occasional wear. Shared by all armor; no downloads or per-frame work.
+  const pixels = new Uint8Array(128 * 128 * 3);
+  for (let y = 0; y < 128; y++) {
+    for (let x = 0; x < 128; x++) {
+      const grain = ((x * 17 + y * 131) ^ (y * 29)) % 19;
+      const seam = x < 3 || y < 3 || x > 124 || y > 124;
+      const bevel = x < 6 || y < 6;
+      const scratch = y % 31 === 7 && x > 24 && x < 86;
+      const value = seam ? 64 : bevel ? 230 : scratch ? 204 : 150 + grain;
+      const at = (y * 128 + x) * 3;
+      pixels[at] = value;
+      pixels[at + 1] = value;
+      pixels[at + 2] = value;
+    }
+  }
+  const armorTexture = RawTexture.CreateRGBTexture(pixels, 128, 128, scene, true, false);
   const paint = (name: string, c: Color3) => {
     const m = new StandardMaterial(name, scene);
     m.diffuseColor = c;
-    m.specularColor = new Color3(0.18, 0.18, 0.2); // metal catches a little light
+    m.specularColor = new Color3(0.35, 0.4, 0.45);
+    m.specularPower = 48;
+    if (name.includes('hull') || name.endsWith('active')) m.diffuseTexture = armorTexture;
     return m;
   };
-  const active = paint('machine.active', new Color3(0.55, 0.3, 0.3));
-  active.emissiveColor = new Color3(0.45, 0.08, 0.08);
+  const active = paint('machine.active', new Color3(0.52, 0.57, 0.62));
+  active.emissiveColor = new Color3(0.12, 0.035, 0.025);
   const frame = paint('machine.frame', new Color3(0.07, 0.07, 0.08));
   frame.specularColor = new Color3(0.1, 0.1, 0.1);
   frame.freeze(); // nothing ever repaints it
@@ -129,8 +149,8 @@ export function applyCreatureIntensity(set: CreatureMaterialSet, low: boolean): 
   for (const kind of ['standard', 'crawler', 'brute'] as const) {
     set[kind].diffuseColor = low ? HULL_LOW[kind] : HULL[kind];
   }
-  set.active.diffuseColor = low ? new Color3(0.3, 0.22, 0.22) : new Color3(0.55, 0.3, 0.3);
-  set.active.emissiveColor = low ? new Color3(0.1, 0.02, 0.02) : new Color3(0.45, 0.08, 0.08);
+  set.active.diffuseColor = low ? new Color3(0.3, 0.22, 0.22) : new Color3(0.52, 0.57, 0.62);
+  set.active.emissiveColor = low ? new Color3(0.025, 0.01, 0.01) : new Color3(0.12, 0.035, 0.025);
   set.eye.emissiveColor = low ? EYE_GLOW_LOW : EYE_GLOW;
 }
 
@@ -211,6 +231,7 @@ class CreatureImpl implements Creature {
     if (kind === 'crawler') this.buildSpider(scene);
     else if (kind === 'brute') this.buildMech(scene);
     else this.buildHound(scene);
+    this.addArmorDetails(scene);
 
     // The armor readout: a camera-facing bar above the machine, hidden
     // until the first hit lands. The fill is a child of the housing so the
@@ -237,6 +258,32 @@ class CreatureImpl implements Creature {
   }
 
   // ---------- part helpers ----------
+  /** Layered face plates, recessed seams and fasteners catch the side light. */
+  private addArmorDetails(scene: Scene): void {
+    if (!this.torso) return;
+    const heavy = this.kind === 'brute';
+    const width = heavy ? 0.76 : this.kind === 'standard' ? 0.4 : 0.28;
+    const height = heavy ? 0.42 : 0.12;
+    const y = heavy ? 0.48 : 0.08;
+    const z = heavy ? 0.36 : this.kind === 'standard' ? 0.48 : 0.24;
+    for (const side of [-1, 1]) {
+      const cheek = this.part(scene, 'box', 'laminatedArmor', { w: width * 0.42, h: height, d: 0.07 }, this.torso, 'hull');
+      cheek.position.set(side * width * 0.27, y, z);
+      cheek.rotation.y = side * -0.22;
+      for (const top of [-1, 1]) {
+        const bolt = this.part(scene, 'cylinder', 'armorFastener', { dia: heavy ? 0.04 : 0.022, h: 0.025 }, this.torso, 'frame');
+        bolt.rotation.x = Math.PI / 2;
+        bolt.position.set(side * width * 0.39, y + top * height * 0.32, z + 0.052);
+      }
+      const piston = this.part(scene, 'cylinder', 'exposedActuator', { dia: heavy ? 0.065 : 0.035, h: heavy ? 0.5 : 0.2 }, this.torso, 'hull');
+      piston.position.set(side * width * 0.58, y - height, 0.12);
+    }
+    for (let i = 0; i < 3; i++) {
+      const slot = this.part(scene, 'box', 'coolingLouver', { w: width * 0.25, h: 0.018, d: 0.025 }, this.torso, 'frame');
+      slot.position.set(0, y - height * 0.2 + i * 0.035, z + 0.06);
+    }
+  }
+
   private part(
     scene: Scene,
     shape: 'box' | 'sphere' | 'capsule' | 'cone' | 'cylinder',
@@ -544,6 +591,8 @@ class CreatureImpl implements Creature {
   }
 
   reset(): void {
+    this.root.rotation.setAll(0);
+    this.root.scaling.setAll(1);
     this.staggerT = 0;
     this.walkPhase = Math.random() * Math.PI * 2;
     this.setActive(false);

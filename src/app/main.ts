@@ -268,7 +268,7 @@ function showPlacementIntro(): void {
       <h1>Before we start</h1>
       <p class="lead">Put your left index finger on <b>F</b> and your right index finger on <b>J</b>.
          Both keys have a raised bump. That is home row, and you should be able to find it without looking.</p>
-      <p>This is a shooting game where typing is the weapon. Every finished word fires the gun.</p>
+      <p>Every correct key fires a round and chips away robot armor. Finish a word for a heavy shot. Watch the target meter to see how many hits remain.</p>
       <p>Sixty seconds of typing tells us where to start you. It is not a test you can fail:
          the worst outcome is that we start at the very beginning, which is a fine place to start.</p>
       <div class="rowbtns">
@@ -516,7 +516,7 @@ function startLesson(): void {
       ${handGuideHtml(lesson)}
       <p class="note" style="text-align:center">Fingers rest on the home row &mdash; the bumps are F and J.
          The glowing fingertip shows which finger reaches for ${lesson.introduces.length ? 'each new key' : "this lesson's keys"}, and it always comes home.</p>
-      <p>${lesson.targetTokens} sequences with the ${profile.stage >= 3 ? 'revolver: one word, one shot' : 'pump shotgun'}.
+      <p>${lesson.targetTokens} sequences with the ${profile.stage >= 3 ? 'revolver' : 'pump shotgun'}. Every correct key damages armor; completed words deliver a heavy shot.
          Wrong key is a dry fire, and the cursor waits: fix it and carry on. Backspace does nothing here.</p>
       <div class="rowbtns">
         <button id="beginLesson">Begin</button>
