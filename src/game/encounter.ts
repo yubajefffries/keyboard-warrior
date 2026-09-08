@@ -25,6 +25,7 @@ import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 
 import type { InputPipeline } from '../input/pipeline';
 import { TypingEngine } from './engine';
+import { Ballistics } from './ballistics';
 import {
   applyCreatureIntensity,
   buildCreature,
@@ -96,7 +97,7 @@ export interface EncounterProgress {
 const MAX_RENDERED = 5;
 const KILL_LINE_Z = -1.6;
 /** Mean spawn depth; enemies appear at -34 to -38, so ~34 units of walk. */
-const MEAN_TRAVEL_UNITS = 36 - Math.abs(KILL_LINE_Z);
+const MEAN_TRAVEL_UNITS = 20 - Math.abs(KILL_LINE_Z);
 
 /** The two dials the pacing model sets. Everything else follows from them. */
 export interface EncounterPacing {
@@ -126,6 +127,8 @@ interface EnemyT {
   tokens: string[];
   /** Words carried at spawn, so the health bar knows what a full bar is. */
   totalTokens: number;
+  totalChars: number;
+  remainingChars: number;
 }
 
 /** Per-kind movement relative to the pacing walk time. PRD 14. [REVIEW] */
@@ -219,6 +222,12 @@ export class Encounter {
   private struggleKey: string | null = null;
   private struggleCount = 0;
   private spawnEnemies = true;
+  private ballistics: Ballistics;
+  private wrecks: { creature: Creature; age: number }[] = [];
+  private targetHud = document.createElement('aside');
+  private targetFill: HTMLElement;
+  private targetLabel: HTMLElement;
+  private targetStatus: HTMLElement;
 
   // Robot burst (see docs/BURST_TESTING.md)
   private robot: RobotTypist;
@@ -232,6 +241,14 @@ export class Encounter {
     this.engine3d = new Engine(deps.canvas, true, { preserveDrawingBuffer: false, stencil: false });
     this.scene = new Scene(this.engine3d);
     this.scene.clearColor = new Color4(0.015, 0.025, 0.022, 1);
+    this.ballistics = new Ballistics(this.scene);
+    this.targetHud.className = 'target-readout';
+    this.targetHud.hidden = true;
+    this.targetHud.innerHTML = '<small>THREAT TRACKING / LIVE</small><strong></strong><div class="armor-track" role="meter" aria-label="Target armor" aria-valuemin="0" aria-valuemax="100"><i></i></div><span></span>';
+    document.body.append(this.targetHud);
+    this.targetFill = this.targetHud.querySelector('i')!;
+    this.targetLabel = this.targetHud.querySelector('strong')!;
+    this.targetStatus = this.targetHud.querySelector('span')!;
 
     this.camera = new FreeCamera('cam', new Vector3(0, 1.7, 0), this.scene);
     this.camera.setTarget(new Vector3(0, 1.5, -10));
@@ -241,12 +258,15 @@ export class Encounter {
     // plus one lamp; the muzzle flash is the second dynamic light. Everything
     // else the laboratory appears lit by is emissive material, which is free.
     const ambient = new HemisphericLight('ambient', new Vector3(0, 1, 0), this.scene);
-    ambient.intensity = 0.32;
+    ambient.intensity = 0.85;
     ambient.diffuse = new Color3(0.45, 0.58, 0.55); // cold institutional green
     ambient.groundColor = new Color3(0.08, 0.1, 0.09);
     const lamp = new PointLight('lamp', new Vector3(0, 3.6, -7), this.scene);
-    lamp.intensity = 0.65;
+    lamp.intensity = 1.4;
     lamp.diffuse = new Color3(0.75, 0.9, 0.8);
+    const rim = new HemisphericLight('machineRim', new Vector3(-1, 0.5, -1), this.scene);
+    rim.diffuse = new Color3(0.25, 0.65, 0.85);
+    rim.intensity = 0.5;
 
     // The abandoned robotics facility (PRD 8, environment passes). Static,
     // frozen, procedural; see environment.ts for the budget notes.
@@ -309,7 +329,7 @@ export class Encounter {
     flashMat.emissiveColor = new Color3(1, 0.75, 0.3);
     flashMat.diffuseColor = Color3.Black();
     flashMat.disableLighting = true;
-    this.flashMesh = MeshBuilder.CreatePlane('flash', { size: 0.3, sideOrientation: 2 /* DOUBLESIDE */ }, this.scene);
+    this.flashMesh = MeshBuilder.CreateDisc('flash', { radius: 0.15, tessellation: 8, sideOrientation: 2 /* DOUBLESIDE */ }, this.scene);
     this.flashMesh.parent = this.gunRoot;
     this.flashMesh.position.set(0, 0, 0.92);
     this.flashMesh.isPickable = false;
@@ -329,6 +349,9 @@ export class Encounter {
     this.tracerMesh.setEnabled(false);
 
     this.creatureMats = makeCreatureMaterialSet(this.scene);
+    for (const kind of ['standard', 'crawler', 'brute'] as const) {
+      for (let i = 0; i < 2; i++) this.releaseCreature(buildCreature(this.scene, kind, this.creatureMats));
+    }
 
     this.typing = new TypingEngine(this.tracker, {
       onPress: (pressed) => {
@@ -336,6 +359,14 @@ export class Encounter {
       },
       onHit: (char) => {
         deps.audio.tick();
+        this.damageKey();
+        if (this.active && this.effects.intensity === 'full') {
+          this.ballistics.fire(this.muzzle.getAbsolutePosition(), this.aimPointOf(this.active));
+          this.recoil = Math.max(this.recoil, 0.18);
+          this.flashT = FLASH_S;
+          this.flashMesh.setEnabled(true);
+          this.flashMesh.scaling.setAll(0.45);
+        }
         this.bump(char, true);
         this.correctChars += 1;
         const combo = this.scorer.hit();
@@ -357,6 +388,7 @@ export class Encounter {
         this.redrawActive();
       },
       onComplete: (token) => {
+        this.damageKey();
         this.correctChars += 1;
         this.bump(token[token.length - 1], true);
         const combo = this.scorer.hit();
@@ -373,7 +405,8 @@ export class Encounter {
             this.fireWeapon(true, this.aimPointOf(target));
             this.scorer.elimination(target.kind);
             target.alive = false;
-            this.releaseCreature(target.creature);
+            target.creature.setHealth(0);
+            this.wrecks.push({ creature: target.creature, age: 0 });
             this.cb.onKill?.(target.kind);
           } else {
             this.fireWeapon(false, this.aimPointOf(target));
@@ -382,7 +415,7 @@ export class Encounter {
             // now wearing its remaining armor as a bar over its head.
             target.creature.root.position.z = Math.max(-38, target.creature.root.position.z - 1.2);
             target.creature.stagger();
-            target.creature.setHealth(target.tokens.length / target.totalTokens);
+            target.creature.setHealth(target.remainingChars / target.totalChars);
           }
         } else {
           this.fireWeapon(true);
@@ -498,6 +531,7 @@ export class Encounter {
     this.state = 'idle';
     this.typing.setEnabled(false);
     this.clearEnemies();
+    this.targetHud.hidden = true;
   }
 
   pause(reason: string): void {
@@ -505,6 +539,8 @@ export class Encounter {
     if (this.robot.running) this.robot.stop();
     this.pausedFrom = this.state;
     this.state = 'paused';
+    this.targetHud.hidden = true;
+    this.ballistics.clear();
     this.typing.setEnabled(false);
     this.cb.onPause?.(reason);
   }
@@ -513,6 +549,7 @@ export class Encounter {
     if (this.state !== 'paused') return;
     this.state = this.pausedFrom;
     this.typing.setEnabled(true);
+    this.updateTargetHud();
   }
 
   /**
@@ -557,7 +594,14 @@ export class Encounter {
     const low = effects.intensity === 'low';
     // Low intensity: enemies read as dark silhouettes, no red glow, eyes out.
     applyCreatureIntensity(this.creatureMats, low);
-    if (low) this.muzzle.intensity = 0;
+    if (low) {
+      this.muzzle.intensity = 0;
+      this.flashT = 0;
+      this.flashMesh.setEnabled(false);
+      this.tracerMesh.setEnabled(false);
+      this.tracerT = -1;
+      this.ballistics.clear();
+    }
   }
 
   /** Retry from checkpoint: fresh enemies, progress and score kept. */
@@ -696,6 +740,7 @@ export class Encounter {
         // Field empty and spawning paused (a wave boundary): nothing to type,
         // and the prompt must say so rather than pointing at a ghost.
         this.active = null;
+        this.targetHud.hidden = true;
         this.typing.setToken('');
         this.deps.prompt.render('', 0);
         this.deps.prompt.setUpcoming([]);
@@ -709,6 +754,7 @@ export class Encounter {
     }
     this.active = best;
     best.creature.setActive(true);
+    this.updateTargetHud();
 
     this.tokenStartPresses = this.correctChars + this.missCount;
     this.tokenStartCorrect = this.correctChars;
@@ -720,6 +766,26 @@ export class Encounter {
 
   private redrawActive(): void {
     this.deps.prompt.render(this.typing.currentToken, this.typing.typedCount);
+  }
+
+  /** Armor is measured in characters, so every accepted key has real damage. */
+  private damageKey(): void {
+    if (!this.active) return;
+    this.active.remainingChars = Math.max(0, this.active.remainingChars - 1);
+    this.active.creature.setHealth(this.active.remainingChars / this.active.totalChars);
+    this.active.creature.stagger();
+    this.updateTargetHud();
+  }
+
+  private updateTargetHud(): void {
+    const target = this.active;
+    this.targetHud.hidden = !target || this.state !== 'running';
+    if (!target) return;
+    const percent = Math.ceil(100 * target.remainingChars / target.totalChars);
+    this.targetLabel.textContent = { standard: 'HOUND / PATROL UNIT', crawler: 'SPIDER / INTERCEPTOR', brute: 'MECH / HEAVY ARMOR' }[target.kind];
+    this.targetFill.style.transform = `scaleX(${target.remainingChars / target.totalChars})`;
+    this.targetFill.parentElement!.setAttribute('aria-valuenow', String(percent));
+    this.targetStatus.textContent = `ARMOR ${percent}%  ·  ${target.remainingChars} HITS TO DISABLE`;
   }
 
   /**
@@ -770,6 +836,7 @@ export class Encounter {
    * `aimPoint` is where the tracer flies (none for a shot into an empty room).
    */
   private fireWeapon(kill: boolean, aimPoint?: Vector3): void {
+    if (aimPoint && this.effects.intensity === 'full') this.ballistics.fire(this.muzzle.getAbsolutePosition(), aimPoint, kill);
     const audio = this.deps.audio;
     this.shotsFired += 1;
     if (this.weapon === 'revolver') {
@@ -812,6 +879,7 @@ export class Encounter {
 
   private spawn(): void {
     if (!this.spawnEnemies || !this.provider) return;
+    this.enemies = this.enemies.filter(e => e.alive);
     if (this.enemies.filter((e) => e.alive).length >= MAX_RENDERED) return;
 
     // The pending queue spawns in the order its words were shown; only when
@@ -819,13 +887,14 @@ export class Encounter {
     const next = this.pending.shift() ?? { kind: this.rollKind(), tokens: null };
     const kind = next.kind;
     const creature = this.acquireCreature(kind);
-    creature.root.position.set((Math.random() - 0.5) * 7, 0, -34 - Math.random() * 4);
+    creature.root.position.set((Math.random() - 0.5) * 5, 0, -18 - Math.random() * 4);
     // Walk time comes from the pacing model; +/-10% so a group still shambles
     // rather than marching. Kind multipliers are what make a crawler a crawler.
     const speed =
       (MEAN_TRAVEL_UNITS / this.pacing.walkTimeS) * KIND_SPEED[kind] * (0.9 + Math.random() * 0.2);
     const tokens = next.tokens ?? this.provider.tokensFor(kind);
-    this.enemies.push({ creature, speed, alive: true, kind, tokens, totalTokens: tokens.length });
+    const totalChars = tokens.reduce((sum, token) => sum + token.length, 0);
+    this.enemies.push({ creature, speed, alive: true, kind, tokens, totalTokens: tokens.length, totalChars, remainingChars: totalChars });
     this.redrawUpcoming();
   }
 
@@ -858,6 +927,9 @@ export class Encounter {
   }
 
   private clearEnemies(): void {
+    for (const wreck of this.wrecks) this.releaseCreature(wreck.creature);
+    this.wrecks.length = 0;
+    this.ballistics.clear();
     for (const e of this.enemies) if (e.alive) this.releaseCreature(e.creature);
     this.enemies.length = 0;
     this.active = null;
@@ -865,6 +937,7 @@ export class Encounter {
 
   private die(reason?: string): void {
     this.state = 'dead';
+    this.targetHud.hidden = true;
     if (this.robot.running) this.robot.stop();
     this.typing.setEnabled(false);
     const worst = this.worstKey();
@@ -885,6 +958,19 @@ export class Encounter {
     const now = performance.now();
 
     const motion = this.effects.motionReduction ? 0.25 : 1;
+    if (this.state === 'running') {
+      this.ballistics.tick(dt, motion);
+      for (let i = this.wrecks.length - 1; i >= 0; i--) {
+        const wreck = this.wrecks[i];
+        wreck.age += dt;
+        wreck.creature.root.rotation.z = wreck.age * 1.8 * motion;
+        wreck.creature.root.scaling.setAll(Math.max(0.01, 1 - wreck.age / 0.45));
+        if (wreck.age >= 0.45) {
+          this.releaseCreature(wreck.creature);
+          this.wrecks.splice(i, 1);
+        }
+      }
+    }
     if (this.recoil > 0) {
       this.recoil = Math.max(0, this.recoil - dt * 6);
       this.gunRoot.position.z = 1.2 - this.recoil * 0.18 * motion;
@@ -921,6 +1007,13 @@ export class Encounter {
     this.activeMs += dt * 1000;
 
     if (this.spawnEnemies) {
+      // Refill the reserve in the render loop, never while handling a key.
+      // Two spare bodies cover successive kills between rendered frames.
+      for (const kind of ['standard', 'crawler', 'brute'] as const) {
+        if ((kind === 'standard' || this.variety) && this.creaturePool[kind].length < 2) {
+          this.releaseCreature(buildCreature(this.scene, kind, this.creatureMats));
+        }
+      }
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0) {
         this.spawn();
@@ -949,7 +1042,7 @@ export class Encounter {
         for (const e of this.enemies)
           if (e.alive && e.creature.root.position.z > nearest) nearest = e.creature.root.position.z;
         if (nearest > -Infinity) {
-          const closeness = (nearest + 38) / (38 + KILL_LINE_Z);
+          const closeness = Math.max(0, Math.min(1, (nearest + 22) / (22 + KILL_LINE_Z)));
           this.health = Math.max(0, this.health - threatDrainPerS(closeness) * dt);
         }
         if (this.health <= 0) {

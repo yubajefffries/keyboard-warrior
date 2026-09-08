@@ -24,25 +24,36 @@ export class PromptView {
   private el: PromptElements;
   private errorUntil = 0;
   private errorShown = false;
+  private token = '';
+  private done = document.createElement('span');
+  private current = document.createElement('span');
+  private rest = document.createElement('span');
+  private error = document.createElement('span');
 
   constructor(el: PromptElements) {
     this.el = el;
+    this.done.className = 'done';
+    this.current.className = 'current';
+    this.error.className = 'errIcon';
+    this.error.textContent = '✖';
+    this.el.active.replaceChildren(this.done, this.current, this.rest, this.error);
   }
 
   /** Per keystroke: done / current / remaining of the active token. */
   render(token: string, typedCount: number): void {
     // Sentences and transmissions (Stages 9-10) cannot fit at drill size.
     // Classes, not inline styles, so text-size and contrast settings stack.
-    this.el.active.classList.toggle('long', token.length > 22 && token.length <= 38);
-    this.el.active.classList.toggle('xlong', token.length > 38);
+    if (token !== this.token) {
+      this.token = token;
+      this.el.active.classList.toggle('long', token.length > 22 && token.length <= 38);
+      this.el.active.classList.toggle('xlong', token.length > 38);
+    }
     const done = token.slice(0, typedCount);
     const current = token[typedCount] ?? '';
     const rest = token.slice(typedCount + 1);
-    this.el.active.innerHTML =
-      `<span class="done">${escapeHtml(done)}</span>` +
-      `<span class="current">${escapeHtml(current)}</span>` +
-      `<span>${escapeHtml(rest)}</span>` +
-      `<span class="errIcon">&#10006;</span>`;
+    this.done.textContent = done;
+    this.current.textContent = current;
+    this.rest.textContent = rest;
   }
 
   /** Per token: the words the player can read ahead to. */
@@ -69,7 +80,9 @@ export class PromptView {
   }
 
   clear(): void {
-    this.el.active.innerHTML = '';
+    this.render('', 0);
+    this.errorShown = false;
+    this.el.active.classList.remove('error');
     this.el.next.innerHTML = '';
   }
 }
